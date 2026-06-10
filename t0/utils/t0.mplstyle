@@ -1,0 +1,75 @@
+# T0 matplotlib style — follows the chart design of Retrocast
+# (https://retrocast.com), The Forecasting Company's forecasting platform.
+# Loaded by t0.utils.style.use_t0_style().
+
+# Figure
+figure.figsize: 12, 6
+figure.dpi: 100
+figure.facecolor: white
+figure.edgecolor: white
+
+# Axes
+axes.facecolor: white
+axes.edgecolor: d4d4d8
+axes.linewidth: 0.8
+axes.labelsize: 14
+axes.titlesize: 16
+axes.titleweight: medium
+axes.labelweight: normal
+axes.labelcolor: 333333
+axes.titlecolor: 333333
+axes.grid: True
+axes.grid.axis: y
+axes.grid.which: major
+axes.prop_cycle: cycler('color', ['444444', '000000', '0DA846', '48DBB4', '4ECDC4', '45B7D1', 'f97316', '8b5cf6'])
+axes.spines.top: False
+axes.spines.right: False
+
+# Grid
+grid.color: e4e4e7
+grid.linestyle: -
+grid.linewidth: 0.8
+grid.alpha: 0.7
+
+# Lines
+lines.linewidth: 2.0
+lines.markersize: 6
+lines.solid_capstyle: round
+lines.solid_joinstyle: round
+
+# Ticks
+xtick.labelsize: 14
+ytick.labelsize: 14
+xtick.color: 71717a
+ytick.color: 71717a
+xtick.labelcolor: 71717a
+ytick.labelcolor: 71717a
+xtick.direction: out
+ytick.direction: out
+xtick.major.size: 4
+ytick.major.size: 0
+xtick.major.width: 0.6
+ytick.major.width: 0
+
+# Legend
+legend.fontsize: 12
+legend.frameon: True
+legend.framealpha: 0.9
+legend.facecolor: white
+legend.edgecolor: d4d4d8
+legend.borderpad: 0.4
+legend.labelspacing: 0.5
+
+# Font
+font.family: sans-serif
+font.size: 13
+
+# Text
+text.color: 333333
+
+# Savefig
+savefig.dpi: 100
+savefig.facecolor: white
+savefig.edgecolor: white
+savefig.bbox: tight
+savefig.pad_inches: 0.2

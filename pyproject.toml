@@ -1,0 +1,130 @@
+[project]
+name = "tfc-t0"
+version = "0.1.0"
+description = "Open-weights time-series forecasting foundation model from The Forecasting Company"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.11,<3.14"
+authors = [{ name = "The Forecasting Company" }]
+keywords = [
+    "time-series",
+    "forecasting",
+    "foundation-model",
+    "transformer",
+    "probabilistic-forecasting",
+    "huggingface",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+dependencies = [
+    # Soft upper bounds match the ML ecosystem convention: opt out of major
+    # version bumps that may break ABI / public API. Bump them when a new
+    # major lands and we've tested against it.
+    "torch>=2.4,<3",
+    "einops>=0.8,<1",
+    # rotary-embedding-torch is verified against the 0.8.x line in NOTICE;
+    # don't allow 0.9 silently.
+    "rotary-embedding-torch>=0.8,<0.9",
+    "huggingface-hub>=0.26,<1",
+    "safetensors>=0.4,<1",
+    # numpy: required by safetensors.torch.save_file/load_file at runtime
+    # (it uses np.prod for buffer sizing); also accepted as input by predict()
+    # via duck typing (no import in t0/ code).
+    "numpy>=1.26,<3",
+    # jaxtyping: shape-annotated tensor signatures (annotations only — no
+    # runtime checker is installed, so there is no runtime cost).
+    "jaxtyping>=0.3,<1",
+]
+
+[project.optional-dependencies]
+# t0.evaluation — GluonTS-style predictor for benchmark evaluation.
+evaluation = ["gluonts>=0.15,<0.17", "tqdm>=4.66"]
+# t0.utils — forecast plotting with the T0 (Retrocast) style.
+plot = ["matplotlib>=3.8,<4"]
+
+[project.urls]
+Homepage = "https://huggingface.co/theforecastingcompany/t0-alpha"
+Source = "https://github.com/theforecastingcompany/tfc-t0"
+Issues = "https://github.com/theforecastingcompany/tfc-t0/issues"
+Documentation = "https://huggingface.co/theforecastingcompany/t0-alpha"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+    "ty>=0.0.17",
+]
+# Tools required by the internal CLIs under tools/. Not imported by the
+# t0/ package itself.
+internal = [
+    # Source .ckpt pickles OmegaConf objects; torch.load needs the class
+    # on the import path to unpickle (convert_checkpoint.py).
+    "omegaconf>=2.3",
+    # YAML frontmatter validation in push_to_hf.py's public preflight.
+    "pyyaml>=6",
+]
+# GIFT-eval benchmark evaluation (notebooks/t0.ipynb + tools/evaluate_gift_eval.py).
+# Reuses the public evaluation + plot extras (gluonts / tqdm / matplotlib)
+# rather than re-declaring them; adds only the benchmark package and the
+# Jupyter runtime. The benchmark package pulls in datasets / pandas /
+# python-dotenv transitively.
+gift-eval = [
+    "tfc-t0[evaluation,plot]",
+    "salesforce-gift-eval",
+    "ipykernel>=6.29",
+    "jupyterlab>=4.5.7",
+]
+
+[tool.uv.sources]
+# Pinned to a known-good revision of the upstream GIFT-eval benchmark repo.
+salesforce-gift-eval = { git = "https://github.com/SalesforceAIResearch/gift-eval.git", rev = "b34ea78bc33fa6bd3aaad2851cfab84d4191c077" }
+
+[tool.uv]
+# Supply-chain hygiene: quarantine newly-published versions for 7 days.
+exclude-newer = "P7D"
+# Upstream gift-eval pins einops==0.7.*; t0 is verified against 0.8.x.
+# gift-eval's einops usage is 0.8-compatible, so force our floor.
+override-dependencies = ["einops>=0.8,<1"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Only the t0/ package ships in the wheel. Internal tooling (tools/) and
+# tests (tests/) are deliberately excluded — guarded by test_wheel.py.
+# LICENSE + NOTICE are picked up automatically via [project.license-files].
+packages = ["t0"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+# F722: jaxtyping's string shape annotations are not forward references.
+# See https://docs.kidger.site/jaxtyping/faq/#flake8-or-ruff-are-throwing-an-error
+ignore = ["E501", "F722"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ty.rules]
+# rope.py is a verbatim port from upstream Datadog Toto. The two known
+# false-positives below come from the upstream code; the port is kept
+# mechanical so they aren't worth fixing locally.
+invalid-method-override = "ignore"
+unsupported-operator = "ignore"
