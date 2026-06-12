@@ -1,6 +1,6 @@
 [project]
 name = "tfc-t0"
-version = "0.1.0"
+version = "0.1.1"
 description = "Open-weights time-series forecasting foundation model from The Forecasting Company"
 readme = "README.md"
 license = { text = "Apache-2.0" }
