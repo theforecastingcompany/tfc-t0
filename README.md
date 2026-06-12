@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://www.theforecastingcompany.com/logo/logo_horizontal_pride_dark.png" alt="The Forecasting Company" width="280" />
+  <img src="https://www.theforecastingcompany.com/logo/logo_horizontal_pride_universal.png" alt="The Forecasting Company" width="280" />
 </p>
 
 # `t0`
@@ -21,8 +21,8 @@ _`t0` forecasting French national electricity demand in Retrocast. Data:
 `t0` leverages covariate information, in the past and future when
 available, to improve its forecast.
 
-| Without covariates                                                | With covariates                                             |
-| ----------------------------------------------------------------- | ----------------------------------------------------------- |
+| Without covariates                                                                                                                   | With covariates                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
 | ![t0 forecast without covariates](https://huggingface.co/theforecastingcompany/t0-alpha/resolve/main/assets/medicam_without_cov.png) | ![t0 forecast with covariates](https://huggingface.co/theforecastingcompany/t0-alpha/resolve/main/assets/medicam_with_cov.png) |
 
 _Data: [Medic'AM](https://www.assurance-maladie.ameli.fr/etudes-et-donnees/medicaments-classe-atc-medicam),

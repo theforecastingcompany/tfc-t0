@@ -54,7 +54,15 @@ class Forecast:
         return interpolate_quantiles(query, levels, self.quantiles)[..., 0]
 
 
-class T0Forecaster(nn.Module, PyTorchModelHubMixin):
+class T0Forecaster(
+    nn.Module,
+    PyTorchModelHubMixin,
+    library_name="tfc-t0",
+    repo_url="https://github.com/theforecastingcompany/tfc-t0",
+    pipeline_tag="time-series-forecasting",
+    license="apache-2.0",
+    tags=["time-series", "forecasting", "foundation-models", "pretrained-models", "safetensors"],
+):
     """Open-weights T0 forecasting backbone.
 
     Construct with explicit hyperparameters, or via ``from_config`` /
