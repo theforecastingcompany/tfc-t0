@@ -1,6 +1,6 @@
 [project]
 name = "tfc-t0"
-version = "0.1.1"
+version = "0.1.2"
 description = "Open-weights time-series forecasting foundation model from The Forecasting Company"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -33,7 +33,10 @@ dependencies = [
     # version bumps that may break ABI / public API. Bump them when a new
     # major lands and we've tested against it.
     "torch>=2.4,<3",
-    "einops>=0.8,<1",
+    # einops floor at 0.7: t0 only uses rearrange/repeat (stable since 0.7),
+    # and downstream integrators (e.g. timecopilot via uni2ts) pin
+    # einops==0.7.*. Test suite verified against both 0.7.0 and 0.8.x.
+    "einops>=0.7,<1",
     # rotary-embedding-torch is verified against the 0.8.x line in NOTICE;
     # don't allow 0.9 silently.
     "rotary-embedding-torch>=0.8,<0.9",
@@ -44,8 +47,10 @@ dependencies = [
     # via duck typing (no import in t0/ code).
     "numpy>=1.26,<3",
     # jaxtyping: shape-annotated tensor signatures (annotations only — no
-    # runtime checker is installed, so there is no runtime cost).
-    "jaxtyping>=0.3,<1",
+    # runtime checker is installed, so there is no runtime cost). Floor at
+    # 0.2.24 for coexistence with packages that pin jaxtyping<0.3 (e.g.
+    # uni2ts, pulled in alongside t0 by timecopilot).
+    "jaxtyping>=0.2.24,<1",
 ]
 
 [project.optional-dependencies]
@@ -94,8 +99,10 @@ salesforce-gift-eval = { git = "https://github.com/SalesforceAIResearch/gift-eva
 [tool.uv]
 # Supply-chain hygiene: quarantine newly-published versions for 7 days.
 exclude-newer = "P7D"
-# Upstream gift-eval pins einops==0.7.*; t0 is verified against 0.8.x.
-# gift-eval's einops usage is 0.8-compatible, so force our floor.
+# Upstream gift-eval pins einops==0.7.*. Keep the internal dev env on the
+# 0.8.x line (the line NOTICE verifies); the published package allows >=0.7
+# so integrators that pin 0.7 can coexist (gift-eval's einops usage is
+# 0.8-compatible, so forcing the dev floor up is safe).
 override-dependencies = ["einops>=0.8,<1"]
 
 [build-system]
