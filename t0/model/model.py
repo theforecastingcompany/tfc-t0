@@ -81,6 +81,8 @@ class T0Forecaster(
         dropout: float,
         quantile_levels: Sequence[float],
         scaler_use_arcsinh: bool = True,
+        dtype: torch.dtype | None = None,
+        **_: object,
     ):
         super().__init__()
         # config.json is the single serialized source of truth; building it validates the quantile levels.
@@ -130,6 +132,9 @@ class T0Forecaster(
             output_size=patch_size * self.head.n_quantiles,
             activation=nn.ReLU,
         )
+
+        if dtype is not None:
+            self.to(dtype=dtype)
 
     @classmethod
     def from_config(cls, config: T0Config) -> Self:
