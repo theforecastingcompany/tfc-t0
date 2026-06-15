@@ -60,7 +60,7 @@ evaluation = ["gluonts>=0.15,<0.17", "tqdm>=4.66"]
 # t0.utils — forecast plotting with the T0 (Retrocast) style.
 plot = ["matplotlib>=3.8,<4"]
 # notebooks/ — for running the example Jupyter notebooks (inference + LoRA).
-notebooks = ["peft>=0.11", "accelerate>=0.30", "ipykernel>=6.29", "matplotlib>=3.8,<4"]
+notebooks = ["peft>=0.11", "accelerate>=0.30", "ipykernel>=6.29", "matplotlib>=3.8,<4", "pandas>=2,<3", "pyarrow>=14"]
 
 [project.urls]
 Homepage = "https://huggingface.co/theforecastingcompany/t0-alpha"
