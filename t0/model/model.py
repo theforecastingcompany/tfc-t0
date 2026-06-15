@@ -207,7 +207,10 @@ class T0Forecaster(
         if context_t.ndim not in (2, 3):
             raise ValueError(f"context must be [T], [B, T] or [B, V, T]; got shape {tuple(context_t.shape)}")
         device = next(self.parameters()).device
-        context_t = context_t.to(device=device, dtype=torch.float32)
+        # Follow the model's parameter dtype so bf16/fp16 models get bf16/fp16
+        # inputs (output is always cast to fp32 in _sanitize_predictions).
+        model_dtype = next(self.parameters()).dtype
+        context_t = context_t.to(device=device, dtype=model_dtype)
 
         future_t = None
         if future_covariates is not None:
@@ -218,13 +221,13 @@ class T0Forecaster(
                     f"future_covariates must be [B={context_t.shape[0]}, F, T+horizon={expected_len}]; "
                     f"got shape {tuple(future_t.shape)}"
                 )
-            future_t = future_t.to(device=device, dtype=torch.float32)
+            future_t = future_t.to(device=device, dtype=model_dtype)
 
         model_input = TimeSeries.from_array(context_t, future_t)
         predictions = RolloutManager(self).predict(
             model_input,
             prediction_length=horizon,
-            query_quantile_levels=torch.tensor(list(quantiles), dtype=torch.float32, device=device),
+            query_quantile_levels=torch.tensor(list(quantiles), dtype=model_dtype, device=device),
             context_length=context_t.shape[-1],
         )
         if context_t.ndim == 3:
