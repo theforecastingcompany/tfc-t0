@@ -82,12 +82,9 @@ class T0Forecaster(
         dropout: float,
         quantile_levels: Sequence[float],
         scaler_use_arcsinh: bool = True,
-        # ``dtype`` is forwarded by ``huggingface_hub`` 1.x's
-        # ``from_pretrained`` (renamed from ``torch_dtype``). bf16 is safe
-        # to downcast (same 8-bit exponent as fp32); fp16 has a 5-bit
-        # exponent, so we keep master weights in fp32 and let ``predict``
-        # wrap the forward in ``torch.autocast`` for fp16 — matching the
-        # pattern transformers documents.
+        # Forwarded by huggingface_hub 1.x's from_pretrained (renamed from
+        # torch_dtype). bf16/fp16 keep fp32 weights and autocast the forward
+        # in predict(); other dtypes run in fp32 with no autocast.
         dtype: torch.dtype | None = None,
         **_: object,
     ):
@@ -140,16 +137,9 @@ class T0Forecaster(
             activation=nn.ReLU,
         )
 
-        if dtype is not None:
-            if dtype is torch.float16:
-                # fp16: keep master weights fp32, autocast in predict.
-                self._amp_dtype: torch.dtype | None = torch.float16
-            else:
-                # bf16 / fp32: safe to downcast directly.
-                self.to(dtype=dtype)
-                self._amp_dtype = None
-        else:
-            self._amp_dtype = None
+        # bf16/fp16 autocast the forward in predict() (weights stay fp32);
+        # anything else runs in fp32.
+        self._amp_dtype: torch.dtype | None = dtype if dtype in (torch.float16, torch.bfloat16) else None
 
     @classmethod
     def from_config(cls, config: T0Config) -> Self:
@@ -222,10 +212,7 @@ class T0Forecaster(
         if context_t.ndim not in (2, 3):
             raise ValueError(f"context must be [T], [B, T] or [B, V, T]; got shape {tuple(context_t.shape)}")
         device = next(self.parameters()).device
-        # Follow the model's parameter dtype so bf16/fp16 models get bf16/fp16
-        # inputs (output is always cast to fp32 in _sanitize_predictions).
-        model_dtype = next(self.parameters()).dtype
-        context_t = context_t.to(device=device, dtype=model_dtype)
+        context_t = context_t.to(device=device, dtype=torch.float32)
 
         future_t = None
         if future_covariates is not None:
@@ -236,12 +223,11 @@ class T0Forecaster(
                     f"future_covariates must be [B={context_t.shape[0]}, F, T+horizon={expected_len}]; "
                     f"got shape {tuple(future_t.shape)}"
                 )
-            future_t = future_t.to(device=device, dtype=model_dtype)
+            future_t = future_t.to(device=device, dtype=torch.float32)
 
         model_input = TimeSeries.from_array(context_t, future_t)
-        # Autocast wraps the forward: matmul/linear/conv in amp dtype,
-        # softmax/layer_norm/binary in fp32. Only set when __init__ stored
-        # an _amp_dtype (i.e. user asked for fp16 — bf16 is downcast already).
+        # Autocast the forward when bf16/fp16 was requested: matmul/linear in
+        # that dtype, softmax/norm in fp32.
         amp_ctx = (
             torch.autocast(device_type=device.type, dtype=self._amp_dtype)
             if self._amp_dtype is not None
@@ -251,7 +237,7 @@ class T0Forecaster(
             predictions = RolloutManager(self).predict(
                 model_input,
                 prediction_length=horizon,
-                query_quantile_levels=torch.tensor(list(quantiles), dtype=model_dtype, device=device),
+                query_quantile_levels=torch.tensor(list(quantiles), dtype=torch.float32, device=device),
                 context_length=context_t.shape[-1],
             )
         if context_t.ndim == 3:
