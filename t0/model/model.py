@@ -6,6 +6,7 @@
 
 """Transformer backbone and ``predict`` API for the open-weights T0 model."""
 
+import contextlib
 import dataclasses
 import logging
 from collections.abc import Sequence
@@ -81,6 +82,11 @@ class T0Forecaster(
         dropout: float,
         quantile_levels: Sequence[float],
         scaler_use_arcsinh: bool = True,
+        # Forwarded by huggingface_hub 1.x's from_pretrained (renamed from
+        # torch_dtype). bf16/fp16 keep fp32 weights and autocast the forward
+        # in predict(); other dtypes run in fp32 with no autocast.
+        dtype: torch.dtype | None = None,
+        **_: object,
     ):
         super().__init__()
         # config.json is the single serialized source of truth; building it validates the quantile levels.
@@ -130,6 +136,10 @@ class T0Forecaster(
             output_size=patch_size * self.head.n_quantiles,
             activation=nn.ReLU,
         )
+
+        # bf16/fp16 autocast the forward in predict() (weights stay fp32);
+        # anything else runs in fp32.
+        self._amp_dtype: torch.dtype | None = dtype if dtype in (torch.float16, torch.bfloat16) else None
 
     @classmethod
     def from_config(cls, config: T0Config) -> Self:
@@ -216,12 +226,20 @@ class T0Forecaster(
             future_t = future_t.to(device=device, dtype=torch.float32)
 
         model_input = TimeSeries.from_array(context_t, future_t)
-        predictions = RolloutManager(self).predict(
-            model_input,
-            prediction_length=horizon,
-            query_quantile_levels=torch.tensor(list(quantiles), dtype=torch.float32, device=device),
-            context_length=context_t.shape[-1],
+        # Autocast the forward when bf16/fp16 was requested: matmul/linear in
+        # that dtype, softmax/norm in fp32.
+        amp_ctx = (
+            torch.autocast(device_type=device.type, dtype=self._amp_dtype)
+            if self._amp_dtype is not None
+            else contextlib.nullcontext()
         )
+        with amp_ctx:
+            predictions = RolloutManager(self).predict(
+                model_input,
+                prediction_length=horizon,
+                query_quantile_levels=torch.tensor(list(quantiles), dtype=torch.float32, device=device),
+                context_length=context_t.shape[-1],
+            )
         if context_t.ndim == 3:
             predictions = predictions.unflatten(0, context_t.shape[:2])
         return Forecast(quantiles=_sanitize_predictions(predictions), quantile_levels=tuple(quantiles))
