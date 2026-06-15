@@ -6,6 +6,7 @@
 
 """Transformer backbone and ``predict`` API for the open-weights T0 model."""
 
+import contextlib
 import dataclasses
 import logging
 from collections.abc import Sequence
@@ -81,6 +82,12 @@ class T0Forecaster(
         dropout: float,
         quantile_levels: Sequence[float],
         scaler_use_arcsinh: bool = True,
+        # ``dtype`` is forwarded by ``huggingface_hub`` 1.x's
+        # ``from_pretrained`` (renamed from ``torch_dtype``). bf16 is safe
+        # to downcast (same 8-bit exponent as fp32); fp16 has a 5-bit
+        # exponent, so we keep master weights in fp32 and let ``predict``
+        # wrap the forward in ``torch.autocast`` for fp16 — matching the
+        # pattern transformers documents.
         dtype: torch.dtype | None = None,
         **_: object,
     ):
@@ -134,7 +141,15 @@ class T0Forecaster(
         )
 
         if dtype is not None:
-            self.to(dtype=dtype)
+            if dtype is torch.float16:
+                # fp16: keep master weights fp32, autocast in predict.
+                self._amp_dtype: torch.dtype | None = torch.float16
+            else:
+                # bf16 / fp32: safe to downcast directly.
+                self.to(dtype=dtype)
+                self._amp_dtype = None
+        else:
+            self._amp_dtype = None
 
     @classmethod
     def from_config(cls, config: T0Config) -> Self:
@@ -224,12 +239,21 @@ class T0Forecaster(
             future_t = future_t.to(device=device, dtype=model_dtype)
 
         model_input = TimeSeries.from_array(context_t, future_t)
-        predictions = RolloutManager(self).predict(
-            model_input,
-            prediction_length=horizon,
-            query_quantile_levels=torch.tensor(list(quantiles), dtype=model_dtype, device=device),
-            context_length=context_t.shape[-1],
+        # Autocast wraps the forward: matmul/linear/conv in amp dtype,
+        # softmax/layer_norm/binary in fp32. Only set when __init__ stored
+        # an _amp_dtype (i.e. user asked for fp16 — bf16 is downcast already).
+        amp_ctx = (
+            torch.autocast(device_type=device.type, dtype=self._amp_dtype)
+            if self._amp_dtype is not None
+            else contextlib.nullcontext()
         )
+        with amp_ctx:
+            predictions = RolloutManager(self).predict(
+                model_input,
+                prediction_length=horizon,
+                query_quantile_levels=torch.tensor(list(quantiles), dtype=model_dtype, device=device),
+                context_length=context_t.shape[-1],
+            )
         if context_t.ndim == 3:
             predictions = predictions.unflatten(0, context_t.shape[:2])
         return Forecast(quantiles=_sanitize_predictions(predictions), quantile_levels=tuple(quantiles))
