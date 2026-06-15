@@ -5,7 +5,7 @@ description = "Open-weights time-series forecasting foundation model from The Fo
 readme = "README.md"
 license = { text = "Apache-2.0" }
 license-files = ["LICENSE", "NOTICE"]
-requires-python = ">=3.11,<3.16"
+requires-python = ">=3.11,<3.15"
 authors = [{ name = "The Forecasting Company" }]
 keywords = [
     "time-series",
