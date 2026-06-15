@@ -5,7 +5,7 @@ description = "Open-weights time-series forecasting foundation model from The Fo
 readme = "README.md"
 license = { text = "Apache-2.0" }
 license-files = ["LICENSE", "NOTICE"]
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.16"
 authors = [{ name = "The Forecasting Company" }]
 keywords = [
     "time-series",
@@ -25,6 +25,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
 ]
@@ -40,7 +41,7 @@ dependencies = [
     # rotary-embedding-torch is verified against the 0.8.x line in NOTICE;
     # don't allow 0.9 silently.
     "rotary-embedding-torch>=0.8,<0.9",
-    "huggingface-hub>=0.26,<1",
+    "huggingface-hub>=1,<2",
     "safetensors>=0.4,<1",
     # numpy: required by safetensors.torch.save_file/load_file at runtime
     # (it uses np.prod for buffer sizing); also accepted as input by predict()
