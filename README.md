@@ -127,6 +127,8 @@ Apache-2.0.
 
 ## 📚 Citation
 
+If our model is useful, please use the following citation and star our repo!
+
 ```bibtex
 @misc{tfc-t0,
   title  = {t0: A time-series forecasting foundation model},
