@@ -83,7 +83,7 @@ internal = [
     # YAML frontmatter validation in push_to_hf.py's public preflight.
     "pyyaml>=6",
 ]
-# GIFT-eval benchmark evaluation (notebooks/t0.ipynb + tools/evaluate_gift_eval.py).
+# GIFT-eval benchmark evaluation (notebooks/t0-alpha.ipynb + tools/evaluate_gift_eval.py).
 # Reuses the public evaluation + plot extras (gluonts / tqdm / matplotlib)
 # rather than re-declaring them; adds only the benchmark package and the
 # Jupyter runtime. The benchmark package pulls in datasets / pandas /
