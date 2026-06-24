@@ -1,4 +1,4 @@
-"""Open-weights T0 forecasting model.
+"""Open-weights t0-alpha forecasting model.
 
 Public API:
     - T0Forecaster — ``nn.Module`` backbone with ``from_pretrained`` /
@@ -6,7 +6,7 @@ Public API:
       user-facing ``predict(context, horizon, quantiles)``.
     - Forecast — the value ``predict`` returns (``quantiles`` + ``median``).
     - T0Config — frozen dataclass; ``T0Config.medium()`` for the
-      published T0 checkpoint.
+      published t0-alpha checkpoint.
 """
 
 from t0.config import T0Config

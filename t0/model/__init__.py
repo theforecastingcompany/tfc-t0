@@ -1,4 +1,4 @@
-"""T0 model package: the forecaster, its layers, and the rollout.
+"""t0-alpha model package: the forecaster, its layers, and the rollout.
 
 ``T0Forecaster.predict`` returns a ``Forecast`` — the container holding the
 predicted ``quantiles`` tensor, the requested ``quantile_levels``, and a

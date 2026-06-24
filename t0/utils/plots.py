@@ -1,4 +1,4 @@
-"""Functions to plot T0 quantile forecasts.
+"""Functions to plot t0-alpha quantile forecasts.
 
 Requires the ``plot`` extra: ``pip install "tfc-t0[plot]"``.
 """

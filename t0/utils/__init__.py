@@ -1,4 +1,4 @@
-"""Plotting and styling utilities for T0 forecasts.
+"""Plotting and styling utilities for t0-alpha forecasts.
 
 Requires the ``plot`` extra: ``pip install "tfc-t0[plot]"``.
 """

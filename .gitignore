@@ -6,7 +6,8 @@ build/
 *.egg-info/
 .ruff_cache/
 .pytest_cache/
-# Saved LoRA adapters and other notebook output (created when the example
-# notebooks are run; not part of the source).
+.ipynb_checkpoints/
+# Example-notebook output (created when the notebooks are run; not source):
+# the GIFT-eval notebook writes results/, the LoRA notebook writes its adapter.
+results/
 t0-lora-demo/
-

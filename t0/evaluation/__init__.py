@@ -1,4 +1,4 @@
-"""Benchmark-evaluation helpers for T0.
+"""Benchmark-evaluation helpers for t0-alpha.
 
 Requires the ``evaluation`` extra: ``pip install "tfc-t0[evaluation]"``.
 """

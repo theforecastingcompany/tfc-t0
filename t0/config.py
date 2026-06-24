@@ -1,7 +1,7 @@
 """Architecture configuration for T0Forecaster.
 
 A plain frozen dataclass. ``T0Config.medium()`` returns the
-hyperparameters of the published T0 checkpoint.
+hyperparameters of the published t0-alpha checkpoint.
 """
 
 from dataclasses import dataclass
@@ -54,7 +54,7 @@ class T0Config:
 
     @classmethod
     def medium(cls) -> Self:
-        """The published T0 configuration."""
+        """The published t0-alpha configuration."""
         return cls(
             embed_dim=512,
             num_layers=24,

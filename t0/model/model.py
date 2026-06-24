@@ -4,7 +4,7 @@
 # Copyright 2025 Datadog, Inc.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Transformer backbone and ``predict`` API for the open-weights T0 model."""
+"""Transformer backbone and ``predict`` API for the open-weights t0-alpha model."""
 
 import contextlib
 import dataclasses
@@ -64,7 +64,7 @@ class T0Forecaster(
     license="apache-2.0",
     tags=["time-series", "forecasting", "foundation-models", "pretrained-models", "safetensors"],
 ):
-    """Open-weights T0 forecasting backbone.
+    """Open-weights t0-alpha forecasting backbone.
 
     Construct with explicit hyperparameters, or via ``from_config`` /
     ``from_pretrained``. ``embed_dim`` must be divisible by ``num_heads`` and

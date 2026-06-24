@@ -1,6 +1,6 @@
 [project]
 name = "tfc-t0"
-version = "0.1.2"
+version = "0.2.0"
 description = "Open-weights time-series forecasting foundation model from The Forecasting Company"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -57,7 +57,7 @@ dependencies = [
 [project.optional-dependencies]
 # t0.evaluation — GluonTS-style predictor for benchmark evaluation.
 evaluation = ["gluonts>=0.15,<0.17", "tqdm>=4.66"]
-# t0.utils — forecast plotting with the T0 (Retrocast) style.
+# t0.utils — forecast plotting with the t0-alpha (Retrocast) style.
 plot = ["matplotlib>=3.8,<4"]
 # notebooks/ — for running the example Jupyter notebooks (inference + LoRA).
 notebooks = ["peft>=0.11", "accelerate>=0.30", "ipykernel>=6.29", "matplotlib>=3.8,<4", "pandas>=2,<3", "pyarrow>=14"]

@@ -3,13 +3,13 @@
 # triple projection) is derived from Chronos-2
 # (https://github.com/amazon-science/chronos-forecasting), adapted for a
 # decoder model. Notable differences from the upstream:
-#   - causal: T0 attends to the past only; Chronos-2's encoder is bidirectional
+#   - causal: t0-alpha attends to the past only; Chronos-2's encoder is bidirectional
 #   - within-patch indexing: each patch carries a normalised time index
 #   - learned type embeddings (target / historical / future) added on top
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Patch encoder for the T0 decoder model.
+"""Patch encoder for the t0-alpha decoder model.
 
 Each patch is encoded as ``[values ‖ time_index ‖ validity_mask]`` (a triple
 projection inspired by Chronos-2), then summed with a learned type embedding

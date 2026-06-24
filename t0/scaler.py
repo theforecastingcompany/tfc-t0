@@ -144,7 +144,7 @@ class CausalScaler(torch.nn.Module):
 
     Targets and historicals get causal stats (Welford); futures get
     per-row global stats. Optionally applies arcsinh after the standard
-    ``(x - loc) / scale`` step (T0-novel, helps with extreme outliers).
+    ``(x - loc) / scale`` step (novel to t0-alpha, helps with extreme outliers).
 
     Stateless: zero parameters, zero buffers, contributes nothing to
     ``state_dict``.

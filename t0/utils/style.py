@@ -1,4 +1,4 @@
-"""T0 matplotlib style utilities.
+"""t0-alpha matplotlib style utilities.
 
 The rcParams live in ``t0.mplstyle`` (matplotlib's native style format,
 shipped with the package); this module loads it and defines the semantic
@@ -15,14 +15,14 @@ except ImportError as err:  # pragma: no cover - exercised only without the extr
 
 
 def use_t0_style() -> None:
-    """Activate the T0 matplotlib style globally.
+    """Activate the t0-alpha matplotlib style globally.
 
     Example::
 
         from t0.utils.style import use_t0_style
 
         use_t0_style()
-        # All subsequent plots use the T0 style
+        # All subsequent plots use the t0-alpha style
     """
     with resources.as_file(resources.files("t0.utils") / "t0.mplstyle") as style_path:
         plt.style.use(style_path)

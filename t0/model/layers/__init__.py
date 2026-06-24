@@ -1,4 +1,4 @@
-"""Building blocks of the T0 transformer."""
+"""Building blocks of the t0-alpha transformer."""
 
 from t0.model.layers.feed_forward import SwiGLU
 from t0.model.layers.group_attention import VariateSelfAttention, VariateSelfAttentionBlock
