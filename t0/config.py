@@ -4,8 +4,13 @@ A plain frozen dataclass. ``T0Config.medium()`` returns the
 hyperparameters of the published t0-alpha checkpoint.
 """
 
+import sys
 from dataclasses import dataclass
-from typing import Self
+
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing_extensions import Self
 
 
 @dataclass(frozen=True)

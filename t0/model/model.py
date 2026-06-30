@@ -9,8 +9,8 @@
 import contextlib
 import dataclasses
 import logging
+import sys
 from collections.abc import Sequence
-from typing import Self
 
 import numpy as np
 import torch
@@ -26,6 +26,11 @@ from t0.model.layers import PatchEncoder, Patcher, QuantileHead, ResidualBlock, 
 from t0.model.rollout import RolloutManager
 from t0.quantile import interpolate_quantiles
 from t0.scaler import CausalScaler
+
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing_extensions import Self
 
 logger = logging.getLogger(__name__)
 

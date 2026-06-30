@@ -1,11 +1,11 @@
 [project]
 name = "tfc-t0"
-version = "0.2.0"
+version = "0.2.1"
 description = "Open-weights time-series forecasting foundation model from The Forecasting Company"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 license-files = ["LICENSE", "NOTICE"]
-requires-python = ">=3.11,<3.15"
+requires-python = ">=3.10,<3.15"
 authors = [{ name = "The Forecasting Company" }]
 keywords = [
     "time-series",
@@ -22,6 +22,7 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -52,6 +53,10 @@ dependencies = [
     # 0.2.24 for coexistence with packages that pin jaxtyping<0.3 (e.g.
     # uni2ts, pulled in alongside t0 by timecopilot).
     "jaxtyping>=0.2.24,<1",
+    # typing-extensions backports typing.Self (PEP 673) to Python 3.10. On
+    # 3.11+ Self comes from the stdlib, so the marker keeps this off the
+    # dependency set there (it's still present transitively via torch).
+    "typing-extensions>=4 ; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -67,6 +72,7 @@ Homepage = "https://huggingface.co/theforecastingcompany/t0-alpha"
 Source = "https://github.com/theforecastingcompany/tfc-t0"
 Issues = "https://github.com/theforecastingcompany/tfc-t0/issues"
 Documentation = "https://huggingface.co/theforecastingcompany/t0-alpha"
+Changelog = "https://github.com/theforecastingcompany/tfc-t0/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
@@ -120,7 +126,7 @@ packages = ["t0"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
