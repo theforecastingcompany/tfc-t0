@@ -4,6 +4,12 @@
 
 # `t0`
 
+<p align="center">
+  <a href="https://pypi.org/project/tfc-t0/"><img src="https://img.shields.io/pypi/v/tfc-t0" alt="PyPI" /></a>
+  <a href="https://pypi.org/project/tfc-t0/"><img src="https://img.shields.io/pypi/pyversions/tfc-t0" alt="Python versions" /></a>
+  <a href="https://github.com/theforecastingcompany/tfc-t0/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/tfc-t0" alt="License" /></a>
+</p>
+
 Open-weights time-series forecasting foundation model from [The Forecasting Company](https://theforecastingcompany.com/).
 `t0` is a transformer-based model that
 produces probabilistic multi-horizon forecasts and natively operates on
