@@ -3,7 +3,7 @@
 Public API:
     - T0Forecaster — ``nn.Module`` backbone with ``from_pretrained`` /
       ``save_pretrained`` (via ``huggingface_hub.ModelHubMixin``) and the
-      user-facing ``predict(context, horizon, quantiles)``.
+      user-facing ``predict(context, horizon, quantiles, future_covariates)``.
     - Forecast — the value ``predict`` returns (``quantiles`` + ``median``).
     - T0Config — frozen dataclass; ``T0Config.medium()`` for the
       published t0-alpha checkpoint.

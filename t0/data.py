@@ -18,8 +18,7 @@ class VariateType(IntEnum):
 
 
 class MaskType(IntEnum):
-    """Reason of values for being masked.
-
+    """Reason why a cell value is masked.
 
     ``WITHHELD`` marks cells the model must predict.
     """
