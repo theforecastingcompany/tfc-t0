@@ -4,6 +4,19 @@ All notable changes to `tfc-t0` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-07-20
+
+### Changed
+- Removed the upper version caps on all core runtime dependencies (`torch`,
+  `einops`, `rotary-embedding-torch`, `huggingface-hub`, `safetensors`,
+  `numpy`, `jaxtyping`). Constraints are now floor-only, so downstream
+  integrators (e.g. Darts) can resolve newer releases without being blocked.
+  Floors are bumped when a new major is tested rather than capped speculatively.
+- Removed the upper version caps on the optional extras as well (`gluonts`,
+  `matplotlib`, `pandas`), matching the floor-only policy.
+- Dropped the `requires-python` upper bound (`<3.15`); the package now declares
+  `>=3.10` with no ceiling, so it never blocks users on newer Python releases.
+
 ## [0.2.1] - 2026-06-26
 
 ### Added
