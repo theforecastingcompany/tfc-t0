@@ -1,4 +1,9 @@
-"""Attention mask helpers, operating on per-patch tensors."""
+"""Attention mask helpers, operating on per-patch tensors.
+
+Naming: a ``patched_`` prefix marks a tensor reshaped into patches but still per-time-step,
+``(V, P, patch_size)``; a ``patch_`` prefix marks one value per patch, ``(V, P)``. The
+helpers here reduce the former to the latter, and the builder consumes only the latter.
+"""
 
 import torch
 from jaxtyping import Bool, Int
@@ -71,15 +76,35 @@ class MaskBuilder:
         self, group_mask: Bool[Tensor, "patches variates variates"]
     ) -> Bool[Tensor, "patches 1 variates variates"]:
         """Add the head broadcast dim so the mask shape is ``(P, 1, V, V)``."""
-        if group_mask.ndim == 2:
-            return group_mask.unsqueeze(0).unsqueeze(0)
         return group_mask.unsqueeze(1)
 
 
 def compute_patch_attention_mask(
-    mask_patches: Int[Tensor, "variates patches patch_size"],
+    patched_mask: Int[Tensor, "variates patches patch_size"],
 ) -> Bool[Tensor, "variates patches"]:
-    """Boolean mask ``(V, P)`` where True = patch contains at least one
-    non-PAD cell, so the model should attend to it."""
-    all_pad = (mask_patches == MaskType.PAD).all(dim=-1)
+    """Boolean mask ``(V, P)`` indicating which patch to attend.
+
+    A patch is attended if it holds at least one non-PAD time step. In the attention mask
+    True means *attend*, the opposite of the ``padding_mask`` the builder takes.
+    """
+    all_pad = (patched_mask == MaskType.PAD).all(dim=-1)
     return ~all_pad
+
+
+def reduce_patch_metadata(
+    patched_metadata: Int[Tensor, "variates patches patch_size"],
+    patched_mask: Int[Tensor, "variates patches patch_size"],
+) -> Int[Tensor, "variates patches"]:
+    """Collapse patched metadata to each patch's first non-PAD time step, or ``-1`` when fully PAD.
+
+    Args:
+        patched_metadata: Patched ``group_ids`` or ``variate_type``.
+        patched_mask: Patched typed mask, the authority on which time steps are padding.
+
+    Returns:
+        One value per patch.
+    """
+    is_real = patched_mask != MaskType.PAD
+    first_real = is_real.int().argmax(dim=-1, keepdim=True)
+    reduced = patched_metadata.gather(-1, first_real).squeeze(-1)
+    return reduced.masked_fill(~is_real.any(dim=-1), -1)

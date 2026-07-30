@@ -21,7 +21,7 @@ class MaskType(IntEnum):
     """Reason of values for being masked.
 
 
-    ``WITHHELD`` marks cells the model must predict.
+    ``WITHHELD`` marks time steps the model must predict.
     """
 
     VALID = 0

@@ -21,7 +21,7 @@ from torch import Tensor
 
 from t0.config import T0Config
 from t0.data import TimeSeries
-from t0.mask import MaskBuilder, compute_patch_attention_mask
+from t0.mask import MaskBuilder
 from t0.model.layers import PatchEncoder, Patcher, QuantileHead, ResidualBlock, Transformer
 from t0.model.rollout import RolloutManager
 from t0.quantile import interpolate_quantiles
@@ -113,10 +113,10 @@ class T0Forecaster(
         self.patcher = Patcher(patch_size=patch_size)
         self.head = QuantileHead(quantile_levels=list(quantile_levels))
         self.mask_builder = MaskBuilder()
-        # Per-cell causal scaling (granularity 1): every timestep is
+        # Per-time-step causal scaling (granularity 1): every time step is
         # standardized by its own running statistics — matching how the
         # published checkpoint was trained. Forecasts are rescaled with the
-        # stats at each patch's last cell (see rescale_predictions).
+        # stats at each patch's last time step (see rescale_predictions).
         self.scaler = CausalScaler(patch_size=1, use_arcsinh=scaler_use_arcsinh)
 
         self.patch_encoder = PatchEncoder(
@@ -153,20 +153,15 @@ class T0Forecaster(
 
     def forward(self, model_input: TimeSeries) -> Float[Tensor, "variates patches patch_size quantiles"]:
         """Predict per-patch quantiles for every patch position."""
-        padded = self.patcher.pad(model_input)
+        padded_input = self.patcher.pad(model_input)
 
-        value_patches = self.patcher.patch(padded.variates)
-        mask_patches = self.patcher.patch(padded.mask)
-        variate_type_patches = self.patcher.patch(padded.variate_type)
-        # First cell of each patch wins as the patch's metadata.
-        patch_group_ids = self.patcher.patch(padded.group_ids)[:, :, 0]
-        patch_variate_type = variate_type_patches[:, :, 0]
+        patched_values = self.patcher.patch(padded_input.variates)
+        patched_mask = self.patcher.patch(padded_input.mask)
+        patched_variate_type = self.patcher.patch(padded_input.variate_type)
+        patched_group_ids = self.patcher.patch(padded_input.group_ids)
 
-        attendable = compute_patch_attention_mask(mask_patches)
-        padding_mask = ~attendable if not attendable.all() else None
-
-        embeddings = self.patch_encoder(value_patches, mask_patches, variate_type_patches)
-        embeddings = self.transformer(embeddings, patch_group_ids, patch_variate_type, padding_mask=padding_mask)
+        embeddings = self.patch_encoder(patched_values, patched_mask, patched_variate_type)
+        embeddings = self.transformer(embeddings, patched_group_ids, patched_variate_type, patched_mask)
 
         decoded = self.decoder(embeddings).unflatten(-1, (self.patch_size, self.head.n_quantiles))
         return self.head(decoded)

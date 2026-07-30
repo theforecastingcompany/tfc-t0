@@ -13,7 +13,7 @@ class Patcher(nn.Module):
 
     ``pad`` left-pads a ``TimeSeries`` to a patch boundary (keeping the most
     recent observation at the right edge); ``patch`` reshapes any aligned
-    per-cell tensor to per-patch form. Stateless: zero parameters, zero
+    per-time-step tensor to per-patch form. Stateless: zero parameters, zero
     state-dict keys.
     """
 
@@ -26,9 +26,9 @@ class Patcher(nn.Module):
     def pad(self, model_input: TimeSeries) -> TimeSeries:
         """Left-pad so ``seq_len`` is a multiple of ``patch_size``.
 
-        Padding cells get ``MaskType.PAD`` values 0.0 and ``-1`` sentinels in
-        ``group_ids`` / ``variate_type``. Returns the input unchanged when
-        already aligned.
+        Padding time steps get ``MaskType.PAD``, values 0.0, and ``-1`` sentinels in
+        ``group_ids`` / ``variate_type``. Returns the input unchanged when already
+        aligned.
         """
         pad_len = (-model_input.seq_len) % self.patch_size
         if pad_len == 0:
@@ -48,5 +48,5 @@ class Patcher(nn.Module):
         )
 
     def patch(self, x: Shaped[Tensor, "variates time"]) -> Shaped[Tensor, "variates patches patch_size"]:
-        """Reshape an aligned per-cell tensor to per-patch form."""
+        """Reshape an aligned per-time-step tensor to per-patch form."""
         return x.unflatten(-1, (-1, self.patch_size))

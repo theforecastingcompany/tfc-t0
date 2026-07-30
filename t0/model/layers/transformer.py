@@ -15,7 +15,7 @@ import torch.nn as nn
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from t0.mask import MaskBuilder
+from t0.mask import MaskBuilder, compute_patch_attention_mask, reduce_patch_metadata
 from t0.model.layers.feed_forward import SwiGLU
 from t0.model.layers.group_attention import VariateSelfAttentionBlock
 from t0.model.layers.norm import RMSNorm
@@ -157,10 +157,15 @@ class Transformer(nn.Module):
     def forward(
         self,
         x: Float[Tensor, "variates patches embed"],
-        patch_group_ids: Int[Tensor, "variates patches"],
-        patch_variate_type: Int[Tensor, "variates patches"],
-        padding_mask: Bool[Tensor, "variates patches"] | None = None,
+        patched_group_ids: Int[Tensor, "variates patches patch_size"],
+        patched_variate_type: Int[Tensor, "variates patches patch_size"],
+        patched_mask: Int[Tensor, "variates patches patch_size"],
     ) -> Float[Tensor, "variates patches embed"]:
+        patch_group_ids = reduce_patch_metadata(patched_group_ids, patched_mask)
+        patch_variate_type = reduce_patch_metadata(patched_variate_type, patched_mask)
+        attendable = compute_patch_attention_mask(patched_mask)
+        padding_mask = ~attendable if not attendable.all() else None
+
         time_attn_mask = self.mask_builder.build_time_mask(patch_group_ids, patch_variate_type, padding_mask)
         group_attn_mask = self.mask_builder.expand_group_mask(self.mask_builder.build_group_mask(patch_group_ids))
 

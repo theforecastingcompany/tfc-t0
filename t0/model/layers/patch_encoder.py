@@ -73,7 +73,7 @@ class PatchEncoder(nn.Module):
         t = self._time_index.unsqueeze(0).unsqueeze(0).expand(total_variates, n_patches, -1)
 
         embedded = self.projection(torch.cat([values, t, validity], dim=-1))
-        # First element of each patch wins as the patch's type; -1 padding
+        # First time step of each patch wins as the patch's type; -1 padding
         # sentinels are clamped to 0 (padding patches are masked downstream).
         type_embedding = self.type_embeddings(torch.clamp(variate_type[:, :, 0], min=0))
         return embedded + type_embedding
