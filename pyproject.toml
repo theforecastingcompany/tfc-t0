@@ -91,13 +91,14 @@ internal = [
     "pyyaml>=6",
 ]
 # GIFT-eval benchmark evaluation (notebooks/t0-alpha.ipynb + tools/evaluate_gift_eval.py).
-# Reuses the public evaluation + plot extras (gluonts / tqdm / matplotlib)
-# rather than re-declaring them; adds only the benchmark package and the
-# Jupyter runtime. The benchmark package pulls in datasets / pandas /
-# python-dotenv transitively.
 gift-eval = [
-    "tfc-t0[evaluation,plot]",
+    "tfc-t0[evaluation,plot]",  # gluonts / tqdm / matplotlib, also required by gift-eval
     "salesforce-gift-eval",
+    "datasets>=4",  # required by gift-eval
+    "pandas>=2",  # required by gift-eval
+    "pyarrow>=14",  # required by gift-eval
+    "python-dotenv>=1",  # required by gift-eval
+    "toolz>=0.12",  # required by gift-eval
     "ipykernel>=6.29",
     "jupyterlab>=4.5.7",
 ]
@@ -109,11 +110,13 @@ salesforce-gift-eval = { git = "https://github.com/SalesforceAIResearch/gift-eva
 [tool.uv]
 # Supply-chain hygiene: quarantine newly-published versions for 7 days.
 exclude-newer = "P7D"
-# Upstream gift-eval pins einops==0.7.*. Keep the internal dev env on the
-# 0.8.x line (the line NOTICE verifies); the published package allows >=0.7
-# so integrators that pin 0.7 can coexist (gift-eval's einops usage is
-# 0.8-compatible, so forcing the dev floor up is safe).
-override-dependencies = ["einops>=0.8,<1"]
+
+# gift-eval is a library that pins outdated dependencies, so make uv ignore them.
+# What it actually imports is declared in the gift-eval group above.
+[[tool.uv.dependency-metadata]]
+name = "salesforce-gift-eval"
+version = "0.0.0a0"
+requires-dist = []
 
 [build-system]
 requires = ["hatchling"]
