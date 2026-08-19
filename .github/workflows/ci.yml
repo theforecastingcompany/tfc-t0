@@ -27,3 +27,20 @@ jobs:
         run: uv run ruff check .
       - name: Import smoke
         run: uv run python -c "from t0 import T0Config, T0Forecaster; print(T0Config.medium())"
+
+  metadata:
+    # The release only discovers bad distribution metadata when the publish step
+    # pre-flights it, by which point the tag is public. Run the same check on
+    # every push instead.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - name: Build wheel + sdist
+        run: uv build
+      # Pinned to the twine the publish job's action bundles, not to the latest:
+      # the failure this guards against is a build backend writing metadata that
+      # *that* twine is too old to accept, and a newer twine would accept it here
+      # and still break the release. Bump both together (see release.yml).
+      - name: Check distribution metadata
+        run: uv run --isolated --with "twine==7.0.0" twine check dist/*

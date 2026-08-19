@@ -15,8 +15,14 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Build wheel + sdist
         run: uv build
+      # The action runs `twine check` before uploading, so its bundled twine has
+      # to understand the metadata our build backend writes. v1.14.0 shipped
+      # twine 6.1.0 / packaging 25.0, which knows metadata versions only up to
+      # 2.4 and rejected the 2.5 that hatchling 1.32 emits; v1.14.2 ships twine
+      # 7.0.0 / packaging 26.2, which accepts it. Keep this current when the
+      # metadata spec moves again.
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
   github-release:
     runs-on: ubuntu-latest
