@@ -16,7 +16,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from huggingface_hub import PyTorchModelHubMixin
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
 
 from t0.config import T0Config
@@ -178,19 +178,32 @@ class T0Forecaster(
         future_covariates: Float[Tensor, "batch future_variates context_plus_horizon"]
         | Float[np.ndarray, "batch future_variates context_plus_horizon"]
         | None = None,
+        mask: Int[Tensor, "*batch time"] | Int[np.ndarray, "*batch time"] | None = None,
+        group_ids: Int[Tensor, " rows"] | Int[np.ndarray, " rows"] | None = None,
     ) -> Forecast:
         """Forecast ``horizon`` future timesteps for a batch of series.
 
         Args:
             context: Past observations — ``[T]`` / ``[B, T]`` (independent
                 univariate series) or ``[B, V, T]`` (multivariate, jointly
-                forecast). NaN marks missing values.
+                forecast). NaN marks a missing observation unless ``mask`` says
+                otherwise.
             horizon: Number of future timesteps to forecast.
             quantiles: Quantile levels to return, sorted ascending in
                 ``(0, 1)``; levels the model wasn't trained on are interpolated.
             future_covariates: Optional ``[B, F, T + horizon]`` covariates known
                 over the context and horizon (e.g. calendar features);
                 conditioned on but not forecast. NaN over the horizon is 0.
+            mask: ``MaskType`` values shaped like ``context``: ``MISSING`` for an
+                absent observation, ``PAD`` for a cell that only pads a shorter
+                series out to the batch's width.
+                Defaults to reading every NaN in ``context`` as a missing observation.
+                Only all-``PAD`` patches are left unattended.
+            group_ids: One id per row of the context — per row of a ``[B, T]``
+                one, per sample-variate row of a ``[B, V, T]`` one — marking
+                which rows are variates of the same series; rows sharing an id
+                are forecast jointly. Defaults to one series per sample. Cannot
+                be combined with ``future_covariates``.
 
         Returns:
             A forecast with quantiles shaped ``[B, horizon, Q]`` or
@@ -225,7 +238,19 @@ class T0Forecaster(
                 )
             future_t = future_t.to(device=device, dtype=torch.float32)
 
-        model_input = TimeSeries.from_array(context_t, future_t)
+        group_t = None
+        if group_ids is not None:
+            group_t = torch.as_tensor(group_ids).to(device=device)
+
+        mask_t = None
+        if mask is not None:
+            mask_t = torch.as_tensor(mask)
+            # Mirror the 1-D promotion applied to `context` so the shapes line up.
+            if mask_t.ndim == 1:
+                mask_t = mask_t.unsqueeze(0)
+            mask_t = mask_t.to(device=device)
+
+        model_input = TimeSeries.from_array(context_t, future_t, mask=mask_t, group_ids=group_t)
         # Autocast the forward when bf16/fp16 was requested: matmul/linear in
         # that dtype, softmax/norm in fp32.
         amp_ctx = (

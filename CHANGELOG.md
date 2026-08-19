@@ -4,6 +4,26 @@ All notable changes to `tfc-t0` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-19
+
+### Added
+- `batch_series` — batch series of different lengths and variate counts into one
+  padded context, the mask describing it, and the group ids that keep each
+  series' variates forecast jointly. Pass all three to `predict`.
+- `mask` and `group_ids` arguments on `T0Forecaster.predict`. `mask` marks every
+  context cell as an absent observation (`MaskType.MISSING`) or as padding for a
+  shorter series (`MaskType.PAD`); `group_ids` says which context rows are
+  variates of one series. `MaskType` is exported for building masks by hand.
+- Without a `mask`, NaN in the context is read as a missing observation, as
+  before — padding is the one case NaN cannot express on its own.
+
+### Fixed
+- Padding a batch of unequal-length series no longer moves the shorter rows'
+  forecasts. A patch covered entirely by padding drops out of attention, so a
+  series' forecast no longer depends on how long its batch mates are — it moved
+  by up to 12.5% before. Batch through `batch_series`, or mark the padding
+  `MaskType.PAD`, to get it.
+
 ## [0.2.3] - 2026-07-30
 
 ### Fixed

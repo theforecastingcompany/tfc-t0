@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="https://www.theforecastingcompany.com/logo/logo_horizontal_pride_universal.png" alt="The Forecasting Company" width="280" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://www.theforecastingcompany.com/logo/logo_horizontal_dark.png" />
+    <img src="https://www.theforecastingcompany.com/logo/logo_horizontal_light.png" alt="The Forecasting Company" width="280" />
+  </picture>
 </p>
 
 # `t0`
@@ -59,8 +62,9 @@ out.median     # (4, 64)
 ```
 
 `predict` accepts `numpy` arrays. 1-D contexts are auto-promoted to a
-single-row batch. NaN values in the context are treated as missing
-observations.
+single-row batch. NaN in the context is read as a missing observation; to
+say that some cells are padding instead, pass a `mask` — see
+[batched inference](#batched-inference).
 
 ### Forecasting with covariates
 
@@ -89,6 +93,36 @@ out = model.predict(
 out.quantiles  # (2, 64, 3)
 out.median     # (2, 64)
 ```
+
+### Batched inference
+
+```python
+import numpy as np
+from t0 import T0Forecaster, batch_series
+
+model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha").eval()
+
+daily = np.random.randn(180)    # one series, 180 past timesteps
+store = np.random.randn(2, 96)  # one series of 2 variates, 96 past timesteps
+hourly = np.random.randn(1024)  # one series, 1024 past timesteps
+
+context, mask, group_ids = batch_series([daily, store, hourly])
+context.shape  # (4, 1024) — variates stacked, right-aligned to the longest
+group_ids      # [0, 1, 1, 2] — `store`'s two variates are forecast jointly
+
+out = model.predict(
+    context,
+    horizon=24,
+    quantiles=[0.1, 0.5, 0.9],
+    mask=mask,
+    group_ids=group_ids,
+)
+out.quantiles  # (4, 24, 3)
+out.median[0]  # the 24-step median forecast for `daily`
+```
+
+**For efficient inference at scale, look at
+[Retrocast](https://app.retrocast.com/).**
 
 ## 🏗️ Architecture
 
@@ -127,9 +161,16 @@ Apache-2.0.
 
 - `T0Forecaster` — `nn.Module` with `from_pretrained` /
   `save_pretrained` (via `huggingface_hub.PyTorchModelHubMixin`) and the
-  user-facing `predict(context, horizon, quantiles, future_covariates)`.
-- `T0Config` — frozen dataclass; `T0Config.medium()` is the published
-  configuration.
+  user-facing `predict(context, horizon, quantiles, future_covariates,
+  mask, group_ids)`.
+- `Forecast` — the object returned by the model.
+- `T0Config` — the configuration of the model; `T0Config.medium()` is the
+  published one.
+- `MaskType` — the reason a time step is masked out: `PAD` (a cell that
+  only widens a shorter series out to the batch's width) or `MISSING` (an
+  absent observation).
+- `batch_series` — utility to batch time series of potentially different
+  lengths.
 
 ## 📚 Citation
 
