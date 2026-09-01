@@ -20,7 +20,7 @@ multiple covariates. `t0-alpha` is our first iteration of the model.
 
 You can use `t0` on [Retrocast](https://app.retrocast.com/), our platform for forecasting on your own data. You can also compare forecast across different open-weight models.
 
-![t0 forecasting French national electricity demand in Retrocast](https://huggingface.co/theforecastingcompany/t0-alpha/resolve/main/assets/enedis_with_holidays.png)
+![t0 forecasting French national electricity demand in Retrocast](https://raw.githubusercontent.com/theforecastingcompany/tfc-t0/main/assets/enedis_with_holidays.webp)
 
 _`t0` forecasting French national electricity demand in Retrocast. Data:
 [Enedis open data](https://data.enedis.fr/)._
@@ -32,7 +32,7 @@ available, to improve its forecast.
 
 | Without covariates                                                                                                                   | With covariates                                                                                                                |
 | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| ![t0 forecast without covariates](https://huggingface.co/theforecastingcompany/t0-alpha/resolve/main/assets/medicam_without_cov.png) | ![t0 forecast with covariates](https://huggingface.co/theforecastingcompany/t0-alpha/resolve/main/assets/medicam_with_cov.png) |
+| ![t0 forecast without covariates](https://raw.githubusercontent.com/theforecastingcompany/tfc-t0/main/assets/medicam_without_cov.webp) | ![t0 forecast with covariates](https://raw.githubusercontent.com/theforecastingcompany/tfc-t0/main/assets/medicam_with_cov.webp) |
 
 _Data: [Medic'AM](https://www.assurance-maladie.ameli.fr/etudes-et-donnees/medicaments-classe-atc-medicam),
 monthly drug reimbursements from the French national health insurance._
