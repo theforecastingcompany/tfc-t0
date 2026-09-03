@@ -20,6 +20,20 @@ multiple covariates. `t0-alpha` is our first iteration of the model.
 
 You can use `t0` on [Retrocast](https://app.retrocast.com/), our platform for forecasting on your own data. You can also compare forecast across different open-weight models.
 
+## Choose how to run `t0-alpha`
+
+This package is the first-party PyTorch runtime. The same original checkpoint
+is also available through a first-party MLX runtime and our managed API:
+
+| Use case | Install or open |
+| --- | --- |
+| Local inference with PyTorch | `pip install tfc-t0` |
+| Local inference on Apple silicon with MLX | [`pip install tfc-t0-mlx`](https://pypi.org/project/tfc-t0-mlx/) |
+| Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com/documentation/t0-alpha) |
+
+The MLX runtime is inference-only, has a similar `T0Forecaster.predict()` API,
+loads this model's safetensors directly and does not install PyTorch.
+
 ![t0 forecasting French national electricity demand in Retrocast](https://raw.githubusercontent.com/theforecastingcompany/tfc-t0/main/assets/enedis_with_holidays.webp)
 
 _`t0` forecasting French national electricity demand in Retrocast. Data:
