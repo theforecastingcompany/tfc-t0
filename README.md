@@ -24,19 +24,21 @@ You can use `t0` on [Retrocast](https://app.retrocast.com/), our platform for fo
 
 ## Choose how to run `t0-alpha`
 
-This package is the first-party PyTorch runtime. First-party MLX and ONNX
-options, plus our managed API, are available for other deployment targets:
+This repository contains the first-party PyTorch and MLX runtimes, published
+as separate packages so each installation keeps only its native tensor
+backend. ONNX artifacts and our managed API cover other deployment targets:
 
 | Use case | Install or open |
 | --- | --- |
 | Local inference with PyTorch | `pip install tfc-t0` |
-| Local inference on Apple silicon with MLX | [`pip install tfc-t0-mlx`](https://pypi.org/project/tfc-t0-mlx/) |
+| Local inference on Apple silicon with MLX | [`pip install tfc-t0-mlx`](mlx/) |
 | Accelerator-oriented local and edge inference with ONNX FP16 | [`t0-alpha-onnx-fp16`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) |
 | CPU and in-browser inference with ONNX INT8 | [`t0-alpha-onnx-int8`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) |
 | Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com/documentation/t0-alpha) |
 
-The MLX runtime is inference-only, has a similar `T0Forecaster.predict()` API,
-loads this model's safetensors directly and does not install PyTorch.
+The MLX runtime lives in [`mlx/`](mlx/). It is inference-only, has a closely
+matched `T0Forecaster.predict()` API, loads the same safetensors directly, and
+does not install PyTorch.
 
 ![t0 forecasting French national electricity demand in Retrocast](https://raw.githubusercontent.com/theforecastingcompany/tfc-t0/main/assets/enedis_with_holidays.webp)
 
