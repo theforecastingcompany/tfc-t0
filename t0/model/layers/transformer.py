@@ -142,6 +142,15 @@ class Transformer(nn.Module):
 
         self.out_norm = RMSNorm(embed_dim)
 
+        # Inference-time "thinking mode": re-apply the top ``loop_layers``
+        # layers ``loop_count`` times per forward pass. The same layer modules
+        # run again, so the repeat is weight-shared by construction. Both
+        # default to the no-op identity, so a plain forward matches the
+        # published checkpoint exactly. ``T0Forecaster.predict`` sets these per
+        # request; see the ``loop_count`` / ``loop_layers`` arguments there.
+        self.loop_layers = 0
+        self.loop_count = 1
+
     def _get_layer_types(
         self,
         num_layers: int,
@@ -169,8 +178,15 @@ class Transformer(nn.Module):
         time_attn_mask = self.mask_builder.build_time_mask(patch_group_ids, patch_variate_type, padding_mask)
         group_attn_mask = self.mask_builder.expand_group_mask(self.mask_builder.build_group_mask(patch_group_ids))
 
-        for layer in self.layers:
+        loop_count = max(1, self.loop_count)
+        n_looped = min(self.loop_layers, self.num_layers) if loop_count > 1 else 0
+        boundary = self.num_layers - n_looped
+
+        for layer in self.layers[:boundary]:
             x = layer(x, time_attn_mask=time_attn_mask, group_attn_mask=group_attn_mask)
+        for _ in range(loop_count):
+            for layer in self.layers[boundary:]:
+                x = layer(x, time_attn_mask=time_attn_mask, group_attn_mask=group_attn_mask)
         return self.out_norm(x)
 
     def get_layer_type_counts(self) -> dict[str, int]:

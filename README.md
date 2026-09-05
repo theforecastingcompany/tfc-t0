@@ -142,6 +142,20 @@ out.median[0]  # the 24-step median forecast for `daily`
 **For efficient inference at scale, look at
 [Retrocast](https://app.retrocast.com/).**
 
+### Thinking mode
+
+`predict` takes an optional effort dial. `loop_count` re-applies the top
+`loop_layers` transformer layers that many times per forward pass, spending
+more compute for a more accurate forecast. `loop_count=1` (the default) runs
+the stack once and matches the published checkpoint.
+
+```python
+out = model.predict(context, horizon=64, loop_count=2)  # top 4 layers, twice
+```
+
+The looped block is weight-shared: the same layers run again, so no extra
+weights load. Pick `loop_layers` in `[1, num_layers]`; it defaults to 4.
+
 ## 🏗️ Architecture
 
 `t0` is a decoder-style patch transformer that alternates time and
@@ -180,7 +194,7 @@ Apache-2.0.
 - `T0Forecaster` — `nn.Module` with `from_pretrained` /
   `save_pretrained` (via `huggingface_hub.PyTorchModelHubMixin`) and the
   user-facing `predict(context, horizon, quantiles, future_covariates,
-  mask, group_ids)`.
+  mask, group_ids, loop_count, loop_layers)`.
 - `Forecast` — the object returned by the model.
 - `T0Config` — the configuration of the model; `T0Config.medium()` is the
   published one.

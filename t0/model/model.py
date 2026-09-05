@@ -151,6 +151,16 @@ class T0Forecaster(
         """Build a fresh, randomly initialized model from a config."""
         return cls(**dataclasses.asdict(config))
 
+    @contextlib.contextmanager
+    def _looped_top_block(self, loop_layers: int, loop_count: int):
+        """Repeat the top ``loop_layers`` transformer layers ``loop_count`` times for the duration of the block."""
+        previous = (self.transformer.loop_layers, self.transformer.loop_count)
+        self.transformer.loop_layers, self.transformer.loop_count = loop_layers, loop_count
+        try:
+            yield
+        finally:
+            self.transformer.loop_layers, self.transformer.loop_count = previous
+
     def forward(self, model_input: TimeSeries) -> Float[Tensor, "variates patches patch_size quantiles"]:
         """Predict per-patch quantiles for every patch position."""
         padded_input = self.patcher.pad(model_input)
@@ -180,6 +190,8 @@ class T0Forecaster(
         | None = None,
         mask: Int[Tensor, "*batch time"] | Int[np.ndarray, "*batch time"] | None = None,
         group_ids: Int[Tensor, " rows"] | Int[np.ndarray, " rows"] | None = None,
+        loop_count: int = 1,
+        loop_layers: int = 4,
     ) -> Forecast:
         """Forecast ``horizon`` future timesteps for a batch of series.
 
@@ -204,6 +216,15 @@ class T0Forecaster(
                 which rows are variates of the same series; rows sharing an id
                 are forecast jointly. Defaults to one series per sample. Cannot
                 be combined with ``future_covariates``.
+            loop_count: Inference-time effort dial ("thinking mode"). The top
+                ``loop_layers`` transformer layers are re-applied this many
+                times per forward pass, trading compute for accuracy. ``1``
+                (the default) runs the stack once, matching the published
+                checkpoint. Values above ``1`` repeat the top block on every
+                forward pass of the rollout.
+            loop_layers: How many top layers form the repeated block when
+                ``loop_count > 1``. Must be in ``[1, num_layers]``. Ignored when
+                ``loop_count == 1``.
 
         Returns:
             A forecast with quantiles shaped ``[B, horizon, Q]`` or
@@ -218,6 +239,12 @@ class T0Forecaster(
                 raise ValueError(f"each quantile must be in (0, 1); got {q}")
         if list(quantiles) != sorted(set(quantiles)):
             raise ValueError(f"quantiles must be sorted ascending without duplicates; got {list(quantiles)}")
+        if loop_count < 1:
+            raise ValueError(f"loop_count must be >= 1, got {loop_count}")
+        if loop_count > 1 and not (1 <= loop_layers <= self.config.num_layers):
+            raise ValueError(
+                f"loop_layers must be in [1, num_layers={self.config.num_layers}] when loop_count > 1, got {loop_layers}"
+            )
 
         context_t = torch.as_tensor(context)
         if context_t.ndim == 1:
@@ -258,7 +285,7 @@ class T0Forecaster(
             if self._amp_dtype is not None
             else contextlib.nullcontext()
         )
-        with amp_ctx:
+        with amp_ctx, self._looped_top_block(loop_layers, loop_count):
             predictions = RolloutManager(self).predict(
                 model_input,
                 prediction_length=horizon,

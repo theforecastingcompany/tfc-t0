@@ -4,6 +4,15 @@ All notable changes to `tfc-t0` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `loop_count` and `loop_layers` arguments on `T0Forecaster.predict` — an
+  inference-time effort dial ("thinking mode"). `loop_count` re-applies the top
+  `loop_layers` transformer layers that many times per forward pass, trading
+  compute for accuracy. `loop_count=1` (the default) runs the stack once and
+  matches the published checkpoint exactly, so existing calls are unchanged.
+
 ## [0.3.1] - 2026-09-01
 
 Documentation-only release.
