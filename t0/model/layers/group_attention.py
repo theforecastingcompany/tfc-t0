@@ -59,7 +59,7 @@ class VariateSelfAttention(nn.Module):
     def forward(
         self,
         x: Float[Tensor, "variates patches embed"],
-        attn_mask: Bool[Tensor, "patches 1 variates variates"],
+        attn_mask: Bool[Tensor, "patches 1 variates variates"] | None,
     ) -> Float[Tensor, "variates patches embed"]:
         # Flip time and variate axes for attention along variate dimension.
         # Pattern from Chronos-2: "batch time d -> time batch d".
@@ -109,7 +109,7 @@ class VariateSelfAttentionBlock(nn.Module):
     def forward(
         self,
         x: Float[Tensor, "variates patches embed"],
-        attn_mask: Bool[Tensor, "patches 1 variates variates"],
+        attn_mask: Bool[Tensor, "patches 1 variates variates"] | None,
     ) -> Float[Tensor, "variates patches embed"]:
         normed = self.norm(x)
         attn_out = self.attention(normed, attn_mask)

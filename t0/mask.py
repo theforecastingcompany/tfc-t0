@@ -20,7 +20,9 @@ class MaskBuilder:
     - **per-patch group mask** ``(P, V, V)`` — at each patch, only variates
       that share a ``group_ids`` value can attend. For inference inputs
       (one independent series per row) every row has a unique group id and
-      the mask reduces to the identity.
+      the mask reduces to the identity. When every variate shares one group
+      and no patch is padding the mask is all-``True``; the builder returns
+      ``None`` there so attention keeps the flash kernel.
     - **per-variate time mask** ``(V, 1, P, P)`` — causal for target /
       historical variates, bidirectional for futures.
 
@@ -30,11 +32,21 @@ class MaskBuilder:
 
     def build_group_mask(
         self, patch_group_ids: Int[Tensor, "variates patches"]
-    ) -> Bool[Tensor, "patches variates variates"]:
-        """Per-patch ``(P, V, V)`` mask; ``-1`` marks padding patches."""
+    ) -> Bool[Tensor, "patches variates variates"] | None:
+        """Per-patch ``(P, V, V)`` mask; ``-1`` marks padding patches.
+
+        Returns ``None`` when the mask would be all-``True`` — every variate
+        shares one group and no patch is padding. An all-``True`` mask blocks
+        nothing, so passing ``None`` to
+        ``F.scaled_dot_product_attention`` is equivalent and keeps the flash
+        kernel. The check avoids materializing the ``(P, V, V)`` tensor.
+        """
         valid = patch_group_ids >= 0
 
         ids_t = patch_group_ids.T
+        if valid.all() and (ids_t == ids_t[:, :1]).all():
+            return None
+
         val_t = valid.T
         same_group = ids_t.unsqueeze(2) == ids_t.unsqueeze(1)
         both_valid = val_t.unsqueeze(2) & val_t.unsqueeze(1)
@@ -73,9 +85,14 @@ class MaskBuilder:
         return mask.unsqueeze(1)
 
     def expand_group_mask(
-        self, group_mask: Bool[Tensor, "patches variates variates"]
-    ) -> Bool[Tensor, "patches 1 variates variates"]:
-        """Add the head broadcast dim so the mask shape is ``(P, 1, V, V)``."""
+        self, group_mask: Bool[Tensor, "patches variates variates"] | None
+    ) -> Bool[Tensor, "patches 1 variates variates"] | None:
+        """Add the head broadcast dim so the mask shape is ``(P, 1, V, V)``.
+
+        Passes ``None`` through unchanged for the elided all-``True`` case.
+        """
+        if group_mask is None:
+            return None
         return group_mask.unsqueeze(1)
 
 
