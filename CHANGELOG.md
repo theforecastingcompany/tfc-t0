@@ -7,9 +7,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
-- Preserve Hugging Face configuration-download errors in `from_pretrained`,
-  including gated-model access failures, instead of reporting missing model
-  constructor arguments.
 - Document the model-access and authentication steps before the PyTorch
   quickstart in the README and model card.
 
