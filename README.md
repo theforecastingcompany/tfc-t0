@@ -24,19 +24,21 @@ You can use `t0` on [Retrocast](https://app.retrocast.com/), our platform for fo
 
 ## Choose how to run `t0-alpha`
 
-This package is the first-party PyTorch runtime. First-party MLX and ONNX
-options, plus our managed API, are available for other deployment targets:
+This repository contains the first-party PyTorch and MLX runtimes, published
+as separate packages so each installation keeps only its native tensor
+backend. ONNX artifacts and our managed API cover other deployment targets:
 
 | Use case | Install or open |
 | --- | --- |
 | Local inference with PyTorch | `pip install tfc-t0` |
-| Local inference on Apple silicon with MLX | [`pip install tfc-t0-mlx`](https://pypi.org/project/tfc-t0-mlx/) |
+| Local inference on Apple silicon with MLX | [`pip install tfc-t0-mlx`](mlx/) |
 | Accelerator-oriented local and edge inference with ONNX FP16 | [`t0-alpha-onnx-fp16`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) |
 | CPU and in-browser inference with ONNX INT8 | [`t0-alpha-onnx-int8`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) |
 | Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com/documentation/t0-alpha) |
 
-The MLX runtime is inference-only, has a similar `T0Forecaster.predict()` API,
-loads this model's safetensors directly and does not install PyTorch.
+The MLX runtime lives in [`mlx/`](mlx/). It is inference-only, has a closely
+matched `T0Forecaster.predict()` API, loads the same safetensors directly, and
+does not install PyTorch.
 
 ![t0 forecasting French national electricity demand in Retrocast](https://raw.githubusercontent.com/theforecastingcompany/tfc-t0/main/assets/enedis_with_holidays.webp)
 
@@ -65,13 +67,26 @@ historical and known-future covariates.
 pip install tfc-t0
 ```
 
+The model repository is gated. Before the first download, sign in to
+[the model page](https://huggingface.co/theforecastingcompany/t0-alpha) and
+accept its access conditions. Then authenticate with a token from that same
+account that can read the model:
+
+```bash
+hf auth login
+```
+
+In a notebook, use `from huggingface_hub import login; login()` instead.
+For scripts and CI, set `HF_TOKEN` in the environment. Signing in to the
+website alone does not authenticate your Python environment.
+
 The simplest path is a univariate forecast through `predict`:
 
 ```python
 import torch
 from t0 import T0Forecaster
 
-model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha").eval()
+model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha", token=True).eval()
 
 context = torch.randn(4, 512)  # 4 series, 512 past timesteps
 out = model.predict(context, horizon=64, quantiles=[0.1, 0.5, 0.9])
