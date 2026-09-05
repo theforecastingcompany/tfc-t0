@@ -11,11 +11,13 @@ import dataclasses
 import logging
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn as nn
-from huggingface_hub import PyTorchModelHubMixin
+from huggingface_hub import PyTorchModelHubMixin, hf_hub_download
+from huggingface_hub.constants import CONFIG_NAME
 from jaxtyping import Float, Int
 from torch import Tensor
 
@@ -145,6 +147,47 @@ class T0Forecaster(
         # bf16/fp16 autocast the forward in predict() (weights stay fp32);
         # anything else runs in fp32.
         self._amp_dtype: torch.dtype | None = dtype if dtype in (torch.float16, torch.bfloat16) else None
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: str | Path,
+        *,
+        revision: str | None = None,
+        force_download: bool = False,
+        token: str | bool | None = None,
+        cache_dir: str | Path | None = None,
+        local_files_only: bool = False,
+        **model_kwargs: object,
+    ) -> Self:
+        """Load a checkpoint, preserving errors when its Hub config is inaccessible.
+
+        For gated models, accept the model's access conditions and authenticate
+        with ``hf auth login`` or pass ``token``. Local directories and cached
+        checkpoints remain usable without network access.
+        """
+        if not Path(pretrained_model_name_or_path).is_dir():
+            # The Hub mixin treats config HTTP errors as an optional missing file.
+            # T0 requires its architecture config: check access first so a denied
+            # download raises the original error rather than a constructor TypeError.
+            hf_hub_download(
+                str(pretrained_model_name_or_path),
+                CONFIG_NAME,
+                revision=revision,
+                force_download=force_download,
+                token=token,
+                cache_dir=cache_dir,
+                local_files_only=local_files_only,
+            )
+        return super().from_pretrained(
+            pretrained_model_name_or_path,
+            revision=revision,
+            force_download=force_download,
+            token=token,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+            **model_kwargs,
+        )
 
     @classmethod
     def from_config(cls, config: T0Config) -> Self:

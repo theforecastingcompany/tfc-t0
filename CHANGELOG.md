@@ -4,6 +4,15 @@ All notable changes to `tfc-t0` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Preserve Hugging Face configuration-download errors in `from_pretrained`,
+  including gated-model access failures, instead of reporting missing model
+  constructor arguments.
+- Document the model-access and authentication steps before the PyTorch
+  quickstart in the README and model card.
+
 ## [0.3.1] - 2026-09-01
 
 Documentation-only release.

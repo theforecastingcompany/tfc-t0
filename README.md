@@ -65,13 +65,26 @@ historical and known-future covariates.
 pip install tfc-t0
 ```
 
+The model repository is gated. Before the first download, sign in to
+[the model page](https://huggingface.co/theforecastingcompany/t0-alpha) and
+accept its access conditions. Then authenticate with a token from that same
+account that can read the model:
+
+```bash
+hf auth login
+```
+
+In a notebook, use `from huggingface_hub import login; login()` instead.
+For scripts and CI, set `HF_TOKEN` in the environment. Signing in to the
+website alone does not authenticate your Python environment.
+
 The simplest path is a univariate forecast through `predict`:
 
 ```python
 import torch
 from t0 import T0Forecaster
 
-model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha").eval()
+model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha", token=True).eval()
 
 context = torch.randn(4, 512)  # 4 series, 512 past timesteps
 out = model.predict(context, horizon=64, quantiles=[0.1, 0.5, 0.9])
