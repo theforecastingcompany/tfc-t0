@@ -1,6 +1,6 @@
 [project]
 name = "tfc-t0-mlx"
-version = "0.1.0a0"
+version = "0.1.0a1"
 description = "Open-weights t0-alpha time-series forecasting model for MLX on Apple silicon"
 readme = "README.md"
 license = "Apache-2.0"

@@ -4,6 +4,15 @@ All notable changes to `tfc-t0-mlx` are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0a1] - 2026-09-05
+
+### Fixed
+
+- Preserve annotated release tags during source verification and build from
+  the verified commit. The `0.1.0a0` publication stopped at source verification;
+  this release contains the same runtime implementation.
+- Document the full FP32 setting used for checkpoint parity on Apple M5.
+
 ## [0.1.0a0] - 2026-09-04
 
 ### Added

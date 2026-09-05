@@ -16,9 +16,12 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version_tag: ${{ steps.release.outputs.version_tag }}
+      commit: ${{ steps.release.outputs.commit }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          # Default tag checkout can replace the annotated ref with its peeled SHA.
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Verify immutable release source
         id: release
@@ -33,14 +36,20 @@ jobs:
             echo "::error::$tag must be an annotated tag" >&2
             exit 1
           fi
+          commit="$(git rev-parse HEAD)"
+          if [ "$(git rev-parse "refs/tags/$tag^{commit}")" != "$commit" ]; then
+            echo "::error::$tag no longer points to the triggering commit" >&2
+            exit 1
+          fi
           git fetch --no-tags origin main
-          if ! git merge-base --is-ancestor "$(git rev-list -n 1 "$tag")" origin/main; then
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
             echo "::error::$tag is not on public main" >&2
             exit 1
           fi
           python3 mlx/tools/release.py "$version_tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version_tag=$version_tag" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           python-version: "3.12"
@@ -62,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ needs.verify.outputs.tag }}
+          ref: ${{ needs.verify.outputs.commit }}
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Build wheel + sdist
         working-directory: mlx
@@ -102,7 +111,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ needs.verify.outputs.tag }}
+          ref: ${{ needs.verify.outputs.commit }}
       - name: Extract validated release notes
         run: >-
           python3 mlx/tools/release.py "${{ needs.verify.outputs.version_tag }}"
