@@ -83,8 +83,8 @@ class TransformerLayer(nn.Module):
                 raise ValueError("time_attn_mask is required for TIME attention")
             x = self.attention_block(x, attn_mask=time_attn_mask)
         else:  # GROUP
-            if group_attn_mask is None:
-                raise ValueError("group_attn_mask is required for GROUP attention")
+            # group_attn_mask is None when the builder elides an all-True mask;
+            # SDPA then runs unmasked and keeps the flash kernel.
             x = self.attention_block(x, attn_mask=group_attn_mask)
 
         x = x + self.mlp(self.norm(x))
