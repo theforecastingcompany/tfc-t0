@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `non_negative` argument on `T0Forecaster.predict`. When set, it clips a
+  series' forecast quantiles at a lower bound of 0 if that series' observed
+  context holds no negative value; a series with a negative observation is left
+  unclipped. The clip also applies to the values fed back into the
+  autoregressive rollout, so long-horizon forecasts stay non-negative. Off by
+  default, so the forecast is unchanged unless you opt in.
+
 ### Fixed
 - Document the model-access and authentication steps before the PyTorch
   quickstart in the README and model card.

@@ -13,11 +13,12 @@ Beyond this horizon, the prediction mechanism falls back to an auto-regressive r
 """
 
 import logging
+from collections.abc import Callable
 from typing import Protocol
 
 import torch
 from einops import rearrange, repeat
-from jaxtyping import Float, Int
+from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 from t0.data import MaskType, TimeSeries, VariateType
@@ -57,10 +58,13 @@ class RolloutManager:
         prediction_length: int,
         query_quantile_levels: Float[Tensor, " query_quantiles"],
         context_length: int,
+        non_negative: bool = False,
     ) -> Float[Tensor, "targets prediction_length query_quantiles"]:
         """Forecast ``prediction_length`` steps for every target row of ``batch``.
 
         Columns of ``batch`` past ``context_length`` are known future covariates.
+        With ``non_negative``, clip each target row's quantiles at 0 when its
+        observed context holds no negative value.
         """
         model = self.model
         patch_size = model.patch_size
@@ -70,12 +74,13 @@ class RolloutManager:
             )
 
         target_rows = batch.variate_type[:, 0] == VariateType.TARGET
+        clip = self._lower_bound_clip(batch, target_rows) if non_negative else lambda prediction: prediction
         buffer = self.prepare_rollout_buffer(batch, prediction_length, context_length)
         context_width = _round_up(context_length, patch_size)
 
         horizon = min(_round_up(prediction_length, patch_size), model.max_horizon)
         block = self.predict_step(buffer.time_slice(0, context_width + horizon), horizon)[target_rows]
-        prediction = interpolate_quantiles(query_quantile_levels, model.head.quantile_levels, block)
+        prediction = clip(interpolate_quantiles(query_quantile_levels, model.head.quantile_levels, block))
         if prediction_length <= horizon:
             return prediction[:, :prediction_length]
 
@@ -97,15 +102,28 @@ class RolloutManager:
         remaining = prediction_length - horizon
         while remaining > 0:
             prev_width = predictions[-1].shape[1]
+            # predictions[-1] is already clipped, so the fed-back context stays non-negative.
             paths = self.update_buffer_with_predictions(paths, predictions[-1], at=context_width + decoded - prev_width)
             horizon = min(_round_up(remaining, patch_size), model.max_horizon)
             window = paths.time_slice(decoded, context_width + decoded + horizon)
             block = self.predict_step(window, horizon)[path_target_rows]
-            prediction = reducer.reduce(rearrange(block, "(t q) h pq -> t q pq h", q=n_paths))
+            prediction = clip(reducer.reduce(rearrange(block, "(t q) h pq -> t q pq h", q=n_paths)))
             predictions.append(prediction)
             decoded += horizon
             remaining -= horizon
         return torch.cat(predictions, dim=1)[:, :prediction_length]
+
+    def _lower_bound_clip(
+        self, batch: TimeSeries, target_rows: Bool[Tensor, " variates"]
+    ) -> Callable[[Float[Tensor, "targets horizon query_quantiles"]], Float[Tensor, "targets horizon query_quantiles"]]:
+        """Build a per-target-row clip to a lower bound of 0.
+
+        A row is clipped when its observed context holds no negative value; a
+        row with a negative observation passes through unchanged.
+        """
+        values = batch.variates[target_rows]
+        has_negative = ((values < 0) & batch.valid_mask[target_rows]).any(dim=1)[:, None, None]
+        return lambda prediction: torch.where(has_negative, prediction, prediction.clamp_min(0.0))
 
     def prepare_rollout_buffer(self, batch: TimeSeries, prediction_length: int, context_length: int) -> TimeSeries:
         """Build the rollout buffer: padded context + a forecast region (targets WITHHELD, known futures VALID)."""
