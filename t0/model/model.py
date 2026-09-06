@@ -180,6 +180,7 @@ class T0Forecaster(
         | None = None,
         mask: Int[Tensor, "*batch time"] | Int[np.ndarray, "*batch time"] | None = None,
         group_ids: Int[Tensor, " rows"] | Int[np.ndarray, " rows"] | None = None,
+        non_negative: bool = False,
     ) -> Forecast:
         """Forecast ``horizon`` future timesteps for a batch of series.
 
@@ -204,6 +205,12 @@ class T0Forecaster(
                 which rows are variates of the same series; rows sharing an id
                 are forecast jointly. Defaults to one series per sample. Cannot
                 be combined with ``future_covariates``.
+            non_negative: Clip forecast quantiles at a lower bound of 0, per
+                series whose observed context holds no negative value. A series
+                with a negative observation is left unclipped. The clip also
+                applies to the values fed back into the autoregressive rollout,
+                so later decode steps see the non-negative history. Defaults to
+                no clipping.
 
         Returns:
             A forecast with quantiles shaped ``[B, horizon, Q]`` or
@@ -264,6 +271,7 @@ class T0Forecaster(
                 prediction_length=horizon,
                 query_quantile_levels=torch.tensor(list(quantiles), dtype=torch.float32, device=device),
                 context_length=context_t.shape[-1],
+                non_negative=non_negative,
             )
         if context_t.ndim == 3:
             predictions = predictions.unflatten(0, context_t.shape[:2])

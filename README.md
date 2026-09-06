@@ -195,7 +195,7 @@ Apache-2.0.
 - `T0Forecaster` — `nn.Module` with `from_pretrained` /
   `save_pretrained` (via `huggingface_hub.PyTorchModelHubMixin`) and the
   user-facing `predict(context, horizon, quantiles, future_covariates,
-  mask, group_ids)`.
+  mask, group_ids, non_negative)`.
 - `Forecast` — the object returned by the model.
 - `T0Config` — the configuration of the model; `T0Config.medium()` is the
   published one.
