@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `TimeSeries.batch` and `T0Forecaster.predict_from_time_series` for integrations
+  that construct complete T0 inputs, including known-future covariates.
+
 ### Fixed
 - Document the model-access and authentication steps before the PyTorch
   quickstart in the README and model card.

@@ -20,7 +20,7 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 from t0.config import T0Config
-from t0.data import TimeSeries
+from t0.data import TimeSeries, VariateType
 from t0.mask import MaskBuilder
 from t0.model.layers import PatchEncoder, Patcher, QuantileHead, ResidualBlock, Transformer
 from t0.model.rollout import RolloutManager
@@ -166,6 +166,83 @@ class T0Forecaster(
         decoded = self.decoder(embeddings).unflatten(-1, (self.patch_size, self.head.n_quantiles))
         return self.head(decoded)
 
+    @staticmethod
+    def _validate_prediction_args(horizon: int, quantiles: Sequence[float]) -> None:
+        if horizon < 1:
+            raise ValueError(f"horizon must be >= 1, got {horizon}")
+        if not quantiles:
+            raise ValueError("quantiles must be non-empty")
+        for q in quantiles:
+            if not (0.0 < q < 1.0):
+                raise ValueError(f"each quantile must be in (0, 1); got {q}")
+        if list(quantiles) != sorted(set(quantiles)):
+            raise ValueError(f"quantiles must be sorted ascending without duplicates; got {list(quantiles)}")
+
+    def _predict_from_time_series(
+        self,
+        model_input: TimeSeries,
+        horizon: int,
+        quantiles: Sequence[float],
+        context_length: int,
+    ) -> Forecast:
+        device = next(self.parameters()).device
+        model_input = model_input.to(device)
+        amp_ctx = (
+            torch.autocast(device_type=device.type, dtype=self._amp_dtype)
+            if self._amp_dtype is not None
+            else contextlib.nullcontext()
+        )
+        with amp_ctx:
+            predictions = RolloutManager(self).predict(
+                model_input,
+                prediction_length=horizon,
+                query_quantile_levels=torch.tensor(list(quantiles), dtype=torch.float32, device=device),
+                context_length=context_length,
+            )
+        return Forecast(quantiles=_sanitize_predictions(predictions), quantile_levels=tuple(quantiles))
+
+    @torch.inference_mode()
+    def predict_from_time_series(
+        self,
+        model_input: TimeSeries,
+        horizon: int,
+        context_length: int,
+        quantiles: Sequence[float] = (0.1, 0.5, 0.9),
+    ) -> Forecast:
+        """Forecast every target row in a prepared T0 ``TimeSeries``.
+
+        This lower-level entry point is useful for integrations that construct
+        and batch ``TimeSeries`` inputs themselves. Unlike ``predict``, its
+        output keeps the flat target-row order from ``model_input``.
+
+        Args:
+            model_input: A T0 input, optionally built with
+                ``TimeSeries.from_array`` and ``TimeSeries.batch``.
+            horizon: Number of future timesteps to forecast.
+            context_length: Width of the right-aligned historical context in
+                the batched input.
+            quantiles: Quantile levels to return, sorted ascending in ``(0, 1)``.
+
+        Returns:
+            A forecast with quantiles shaped ``[target_rows, horizon, Q]``.
+        """
+        self._validate_prediction_args(horizon, quantiles)
+        if not 1 <= context_length <= model_input.seq_len:
+            raise ValueError(
+                f"context_length must be between 1 and the input width ({model_input.seq_len}), got {context_length}"
+            )
+        row_types = model_input.variate_type[:, -1]
+        if not (row_types == VariateType.TARGET).any():
+            raise ValueError("model_input must contain at least one target row")
+        has_future_covariates = (row_types == VariateType.FUTURE).any()
+        expected_width = context_length + horizon if has_future_covariates else context_length
+        if model_input.seq_len != expected_width:
+            raise ValueError(
+                f"model_input width must be {expected_width} for context_length={context_length} "
+                f"and horizon={horizon}, got {model_input.seq_len}"
+            )
+        return self._predict_from_time_series(model_input, horizon, quantiles, context_length)
+
     @torch.inference_mode()
     def predict(
         self,
@@ -209,15 +286,7 @@ class T0Forecaster(
             A forecast with quantiles shaped ``[B, horizon, Q]`` or
             ``[B, V, horizon, Q]`` — float32, finite, on the model's device.
         """
-        if horizon < 1:
-            raise ValueError(f"horizon must be >= 1, got {horizon}")
-        if not quantiles:
-            raise ValueError("quantiles must be non-empty")
-        for q in quantiles:
-            if not (0.0 < q < 1.0):
-                raise ValueError(f"each quantile must be in (0, 1); got {q}")
-        if list(quantiles) != sorted(set(quantiles)):
-            raise ValueError(f"quantiles must be sorted ascending without duplicates; got {list(quantiles)}")
+        self._validate_prediction_args(horizon, quantiles)
 
         context_t = torch.as_tensor(context)
         if context_t.ndim == 1:
@@ -251,23 +320,11 @@ class T0Forecaster(
             mask_t = mask_t.to(device=device)
 
         model_input = TimeSeries.from_array(context_t, future_t, mask=mask_t, group_ids=group_t)
-        # Autocast the forward when bf16/fp16 was requested: matmul/linear in
-        # that dtype, softmax/norm in fp32.
-        amp_ctx = (
-            torch.autocast(device_type=device.type, dtype=self._amp_dtype)
-            if self._amp_dtype is not None
-            else contextlib.nullcontext()
-        )
-        with amp_ctx:
-            predictions = RolloutManager(self).predict(
-                model_input,
-                prediction_length=horizon,
-                query_quantile_levels=torch.tensor(list(quantiles), dtype=torch.float32, device=device),
-                context_length=context_t.shape[-1],
-            )
+        forecast = self._predict_from_time_series(model_input, horizon, quantiles, context_t.shape[-1])
+        predictions = forecast.quantiles
         if context_t.ndim == 3:
             predictions = predictions.unflatten(0, context_t.shape[:2])
-        return Forecast(quantiles=_sanitize_predictions(predictions), quantile_levels=tuple(quantiles))
+        return Forecast(quantiles=predictions, quantile_levels=forecast.quantile_levels)
 
 
 def _sanitize_predictions(predictions: Float[Tensor, "*batch quantiles"]) -> Float[Tensor, "*batch quantiles"]:

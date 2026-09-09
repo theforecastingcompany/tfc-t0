@@ -203,6 +203,72 @@ class TimeSeries:
             variate_type=torch.cat([torch.cat([variate_type, h_type], dim=1), fut_type], dim=0),
         )
 
+    @classmethod
+    def batch(cls, series: Sequence["TimeSeries"]) -> "TimeSeries":
+        """Batch T0 inputs with different widths and variate counts.
+
+        Inputs are right-aligned so their forecast horizons remain aligned.
+        Shorter inputs receive ``PAD`` cells on the left, and group ids are
+        remapped so different inputs never attend to one another. This supports
+        complete inputs containing target, historical, and future variates.
+        Padding cells use ``-1`` for both group id and variate type metadata.
+
+        Args:
+            series: Non-empty sequence of T0 inputs. Each row must have a group
+                id and variate type at its final timestep.
+
+        Returns:
+            One ``TimeSeries`` containing all input rows, on the first input's
+            device.
+
+        Raises:
+            ValueError: The sequence is empty or an input is malformed.
+        """
+        if not series:
+            raise ValueError("series must hold at least one TimeSeries")
+
+        device = series[0].device
+        width = max(item.seq_len for item in series)
+        n_rows = sum(item.variates.shape[0] for item in series)
+        variates = torch.zeros((n_rows, width), dtype=torch.float32, device=device)
+        mask = torch.full((n_rows, width), MaskType.PAD, dtype=torch.int8, device=device)
+        group_ids = torch.full((n_rows, width), -1, dtype=torch.long, device=device)
+        variate_type = torch.full((n_rows, width), -1, dtype=torch.long, device=device)
+
+        row_start = 0
+        group_offset = 0
+        for item in series:
+            shape = tuple(item.variates.shape)
+            if item.variates.ndim != 2 or any(
+                tuple(values.shape) != shape for values in (item.mask, item.group_ids, item.variate_type)
+            ):
+                raise ValueError("each TimeSeries field must have the same two-dimensional shape")
+            if item.seq_len == 0 or (item.mask[:, -1] == MaskType.PAD).any():
+                raise ValueError("each TimeSeries row must end with a non-PAD timestep")
+
+            item_rows = item.variates.shape[0]
+            row_stop = row_start + item_rows
+            column_start = width - item.seq_len
+            item_groups = item.group_ids[:, -1]
+            if (item_groups < 0).any():
+                raise ValueError("each TimeSeries row must end with a non-negative group id")
+            unique_groups, remapped_groups = torch.unique(item_groups, sorted=True, return_inverse=True)
+            remapped_groups = remapped_groups.to(device=device) + group_offset
+
+            variates[row_start:row_stop, column_start:] = item.variates.to(device=device, dtype=torch.float32)
+            item_mask = item.mask.to(device=device, dtype=torch.int8)
+            mask[row_start:row_stop, column_start:] = item_mask
+            non_padding = item_mask != MaskType.PAD
+            item_group_ids = remapped_groups[:, None].expand(item_rows, item.seq_len)
+            item_variate_type = item.variate_type.to(device=device, dtype=torch.long)
+            group_ids[row_start:row_stop, column_start:] = item_group_ids.masked_fill(~non_padding, -1)
+            variate_type[row_start:row_stop, column_start:] = item_variate_type.masked_fill(~non_padding, -1)
+
+            row_start = row_stop
+            group_offset += len(unique_groups)
+
+        return cls(variates=variates, mask=mask, group_ids=group_ids, variate_type=variate_type)
+
 
 def batch_series(
     series: Sequence[Float[Tensor, "*variates time"] | Float[np.ndarray, "*variates time"]],

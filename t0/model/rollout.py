@@ -69,7 +69,7 @@ class RolloutManager:
                 f"max_horizon must be a positive multiple of patch_size ({patch_size}), got {model.max_horizon}"
             )
 
-        target_rows = batch.variate_type[:, 0] == VariateType.TARGET
+        target_rows = batch.variate_type[:, -1] == VariateType.TARGET
         buffer = self.prepare_rollout_buffer(batch, prediction_length, context_length)
         context_width = _round_up(context_length, patch_size)
 
@@ -86,7 +86,7 @@ class RolloutManager:
         )
         n_paths = len(query_quantile_levels)
         paths = self.expand_prediction_paths(buffer, n_paths)
-        path_target_rows = paths.variate_type[:, 0] == VariateType.TARGET
+        path_target_rows = paths.variate_type[:, -1] == VariateType.TARGET
         reducer = QuantileRolloutReducer(
             predicted_quantile_levels=model.head.quantile_levels,
             query_quantile_levels=query_quantile_levels,
@@ -118,13 +118,13 @@ class RolloutManager:
 
         forecast_values = torch.zeros((n_rows, forecast_width), dtype=batch.variates.dtype, device=device)
         forecast_mask = torch.full((n_rows, forecast_width), MaskType.PAD, dtype=torch.int8, device=device)
-        forecast_mask[batch.variate_type[:, 0] == VariateType.TARGET] = MaskType.WITHHELD
+        forecast_mask[batch.variate_type[:, -1] == VariateType.TARGET] = MaskType.WITHHELD
         if known > 0:
-            future_rows = batch.variate_type[:, 0] == VariateType.FUTURE
+            future_rows = batch.variate_type[:, -1] == VariateType.FUTURE
             forecast_values[future_rows, :known] = batch.variates[future_rows, context_length : context_length + known]
             forecast_mask[future_rows, :known] = batch.mask[future_rows, context_length : context_length + known]
-        row_group = batch.group_ids[:, :1].expand(n_rows, forecast_width)
-        row_type = batch.variate_type[:, :1].expand(n_rows, forecast_width)
+        row_group = batch.group_ids[:, -1:].expand(n_rows, forecast_width)
+        row_type = batch.variate_type[:, -1:].expand(n_rows, forecast_width)
 
         pad_values = torch.zeros((n_rows, pad_left), dtype=batch.variates.dtype, device=device)
         pad_mask = torch.full((n_rows, pad_left), MaskType.PAD, dtype=torch.int8, device=device)
@@ -158,7 +158,7 @@ class RolloutManager:
         at: int,
     ) -> TimeSeries:
         """Write target predictions into the forecast region (``VALID``); future rows are left untouched."""
-        target_rows = buffer.variate_type[:, 0] == VariateType.TARGET
+        target_rows = buffer.variate_type[:, -1] == VariateType.TARGET
         horizon = prediction.shape[1]
         variates = buffer.variates.clone()
         mask = buffer.mask.clone()

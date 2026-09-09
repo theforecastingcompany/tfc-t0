@@ -31,7 +31,7 @@ backend. ONNX artifacts and our managed API cover other deployment targets:
 | Use case | Install or open |
 | --- | --- |
 | Local inference with PyTorch | `pip install tfc-t0` |
-| Local inference on Apple silicon with MLX | [`pip install tfc-t0-mlx`](mlx/) |
+| Local inference on Apple silicon with MLX | `pip install tfc-t0-mlx` |
 | Accelerator-oriented local and edge inference with ONNX FP16 | [`t0-alpha-onnx-fp16`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) |
 | CPU and in-browser inference with ONNX INT8 | [`t0-alpha-onnx-int8`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) |
 | Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com/documentation/t0-alpha) |
@@ -154,6 +154,27 @@ out.quantiles  # (4, 24, 3)
 out.median[0]  # the 24-step median forecast for `daily`
 ```
 
+Integrations that prepare complete T0 inputs, including known-future
+covariates, can batch the native representation directly:
+
+```python
+from t0 import TimeSeries
+
+first = TimeSeries.from_array(context_1, future_covariates_1)
+second = TimeSeries.from_array(context_2, future_covariates_2)
+batch = TimeSeries.batch([first, second])
+
+out = model.predict_from_time_series(
+    batch,
+    horizon=64,
+    context_length=max(context_1.shape[-1], context_2.shape[-1]),
+)
+```
+
+Here each context includes its batch axis, for example `[1, V, T]`, and each
+known-future input is `[1, F, T + horizon]`. The output is ordered by the
+flattened target rows in `batch`.
+
 **For efficient inference at scale, look at
 [Retrocast](https://app.retrocast.com/).**
 
@@ -204,6 +225,9 @@ Apache-2.0.
   absent observation).
 - `batch_series` — utility to batch time series of potentially different
   lengths.
+- `TimeSeries.from_array` / `TimeSeries.batch` / `T0Forecaster.predict_from_time_series` —
+  lower-level integration API for batching complete T0 inputs, including
+  known-future covariates.
 
 ## 📚 Citation
 
