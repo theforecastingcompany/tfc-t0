@@ -20,17 +20,12 @@ from einops import rearrange, repeat
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from t0.data import MaskType, TimeSeries, VariateType
+from t0.data import MaskType, TimeSeries, VariateType, round_up
 from t0.model.layers import QuantileHead
 from t0.quantile import QuantileRolloutReducer, interpolate_quantiles
 from t0.scaler import CausalScaler
 
 logger = logging.getLogger(__name__)
-
-
-def _round_up(value: int, multiple: int) -> int:
-    """Smallest multiple of ``multiple`` that is ``>= value``."""
-    return -(-value // multiple) * multiple
 
 
 class RolloutModel(Protocol):
@@ -71,9 +66,9 @@ class RolloutManager:
 
         target_rows = batch.variate_type[:, -1] == VariateType.TARGET
         buffer = self.prepare_rollout_buffer(batch, prediction_length, context_length)
-        context_width = _round_up(context_length, patch_size)
+        context_width = round_up(context_length, patch_size)
 
-        horizon = min(_round_up(prediction_length, patch_size), model.max_horizon)
+        horizon = min(round_up(prediction_length, patch_size), model.max_horizon)
         block = self.predict_step(buffer.time_slice(0, context_width + horizon), horizon)[target_rows]
         prediction = interpolate_quantiles(query_quantile_levels, model.head.quantile_levels, block)
         if prediction_length <= horizon:
@@ -98,7 +93,7 @@ class RolloutManager:
         while remaining > 0:
             prev_width = predictions[-1].shape[1]
             paths = self.update_buffer_with_predictions(paths, predictions[-1], at=context_width + decoded - prev_width)
-            horizon = min(_round_up(remaining, patch_size), model.max_horizon)
+            horizon = min(round_up(remaining, patch_size), model.max_horizon)
             window = paths.time_slice(decoded, context_width + decoded + horizon)
             block = self.predict_step(window, horizon)[path_target_rows]
             prediction = reducer.reduce(rearrange(block, "(t q) h pq -> t q pq h", q=n_paths))
@@ -113,7 +108,7 @@ class RolloutManager:
         device = batch.device
         n_rows = batch.variates.shape[0]
         pad_left = (-context_length) % patch_size
-        forecast_width = _round_up(prediction_length, patch_size)
+        forecast_width = round_up(prediction_length, patch_size)
         known = min(batch.seq_len - context_length, forecast_width)  # future cols already in `batch`
 
         forecast_values = torch.zeros((n_rows, forecast_width), dtype=batch.variates.dtype, device=device)
@@ -136,6 +131,14 @@ class RolloutManager:
             group_ids=torch.cat([pad_sentinel, batch.group_ids[:, context], row_group], dim=1),
             variate_type=torch.cat([pad_sentinel, batch.variate_type[:, context], row_type], dim=1),
         )
+
+    def predict_step(self, window: TimeSeries, horizon: int) -> Float[Tensor, "variates horizon model_quantiles"]:
+        """Scale, run the model, and rescale one window; return the ``horizon`` patches after the context end."""
+        model = self.model
+        scaled, loc_scale = model.scaler.scale_input(window)
+        predictions = model.scaler.rescale_predictions(model(scaled), loc_scale, model.patch_size)
+        context_patches = (window.seq_len - horizon) // model.patch_size
+        return predictions[:, context_patches - 1 : context_patches - 1 + horizon // model.patch_size].flatten(1, 2)
 
     def expand_prediction_paths(self, buffer: TimeSeries, n_paths: int) -> TimeSeries:
         """Replicate each row into ``n_paths`` trajectories with distinct group ids, one per query quantile."""
@@ -165,11 +168,3 @@ class RolloutManager:
         variates[target_rows, at : at + horizon] = rearrange(prediction, "t h q -> (t q) h").to(variates.dtype)
         mask[target_rows, at : at + horizon] = MaskType.VALID
         return TimeSeries(variates=variates, mask=mask, group_ids=buffer.group_ids, variate_type=buffer.variate_type)
-
-    def predict_step(self, window: TimeSeries, horizon: int) -> Float[Tensor, "variates horizon model_quantiles"]:
-        """Scale, run the model, and rescale one window; return the ``horizon`` patches after the context end."""
-        model = self.model
-        scaled, loc_scale = model.scaler.scale_input(window)
-        predictions = model.scaler.rescale_predictions(model(scaled), loc_scale, model.patch_size)
-        context_patches = (window.seq_len - horizon) // model.patch_size
-        return predictions[:, context_patches - 1 : context_patches - 1 + horizon // model.patch_size].flatten(1, 2)

@@ -11,6 +11,11 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 
+def round_up(value: int, multiple: int) -> int:
+    """Smallest multiple of ``multiple`` that is ``>= value``."""
+    return -(-value // multiple) * multiple
+
+
 class VariateType(IntEnum):
     """Role of a variate."""
 
@@ -120,6 +125,7 @@ class TimeSeries:
         future_covariates: Float[Tensor, "batch future_variates context_plus_horizon"] | None = None,
         mask: Int[Tensor, "batch time"] | Int[Tensor, "batch variates time"] | None = None,
         group_ids: Int[Tensor, " rows"] | None = None,
+        horizon: int = 0,
     ) -> "TimeSeries":
         """Build model input from a target context and optional future covariates.
 
@@ -131,6 +137,9 @@ class TimeSeries:
         ``group_ids`` holds one id per row of the flattened ``targets``; rows
         sharing an id are variates of one series and attend to one another.
         Without it every row of a ``(B, T)`` target is its own series.
+
+        ``horizon`` extends the target rows with that many ``WITHHELD`` timesteps,
+        marking the region to predict. ``future_covariates`` imply it from their width.
 
         Raises:
             ValueError:
@@ -169,38 +178,60 @@ class TimeSeries:
             row_groups = group_ids.to(device=device, dtype=torch.long)
         row_group_ids = row_groups.unsqueeze(1).expand(n_target, context_len).contiguous()
         variate_type = torch.full((n_target, context_len), VariateType.TARGET, dtype=torch.long, device=device)
-        if future_covariates is None or future_covariates.shape[1] == 0:
+        if horizon < 0:
+            raise ValueError(f"horizon must be >= 0, got {horizon}")
+
+        future_rows = None
+        if future_covariates is not None and future_covariates.shape[1] != 0:
+            total_len = future_covariates.shape[2]
+            if future_covariates.ndim != 3 or future_covariates.shape[0] != batch_size or total_len < context_len:
+                raise ValueError(
+                    f"future_covariates must be (B={batch_size}, F, T+H>=T={context_len}), "
+                    f"got shape {tuple(future_covariates.shape)}"
+                )
+            # The covariates span context + horizon, so they imply the horizon.
+            implied_horizon = total_len - context_len
+            if horizon and horizon != implied_horizon:
+                raise ValueError(
+                    f"horizon={horizon} contradicts future_covariates, which span "
+                    f"{implied_horizon} steps past the context"
+                )
+            horizon = implied_horizon
+
+            # Future rows span the full [0, T+H), VALID throughout (known context AND horizon).
+            n_future = future_covariates.shape[1]
+            rows = batch_size * n_future
+            fut_values = future_covariates.to(device).reshape(rows, total_len)
+            fut_mask = torch.full((rows, total_len), MaskType.VALID, dtype=torch.int8, device=device)
+            fut_is_nan = torch.isnan(fut_values)
+            if fut_is_nan.any():
+                fut_mask = fut_mask.masked_fill(fut_is_nan, MaskType.MISSING)
+                fut_values = torch.nan_to_num(fut_values, nan=0.0)
+            fut_group = sample_ids.repeat_interleave(n_future).unsqueeze(1).expand(rows, total_len).contiguous()
+            fut_type = torch.full((rows, total_len), VariateType.FUTURE, dtype=torch.long, device=device)
+            future_rows = (fut_values, fut_mask, fut_group, fut_type)
+
+        if horizon > 0:
+            # Extend target rows over the horizon with WITHHELD: the region to predict.
+            variates = torch.cat(
+                [variates, torch.zeros((n_target, horizon), dtype=variates.dtype, device=device)], dim=1
+            )
+            target_mask = torch.cat(
+                [target_mask, torch.full((n_target, horizon), MaskType.WITHHELD, dtype=torch.int8, device=device)],
+                dim=1,
+            )
+            row_group_ids = torch.cat([row_group_ids, row_group_ids[:, :1].expand(n_target, horizon)], dim=1)
+            variate_type = torch.cat([variate_type, variate_type[:, :1].expand(n_target, horizon)], dim=1)
+
+        if future_rows is None:
             return cls(variates=variates, mask=target_mask, group_ids=row_group_ids, variate_type=variate_type)
 
-        total_len = future_covariates.shape[2]
-        if future_covariates.ndim != 3 or future_covariates.shape[0] != batch_size or total_len < context_len:
-            raise ValueError(
-                f"future_covariates must be (B={batch_size}, F, T+H>=T={context_len}), "
-                f"got shape {tuple(future_covariates.shape)}"
-            )
-        # Future rows span the full [0, T+H), VALID throughout (known context AND horizon).
-        n_future = future_covariates.shape[1]
-        rows = batch_size * n_future
-        fut_values = future_covariates.to(device).reshape(rows, total_len)
-        fut_mask = torch.full((rows, total_len), MaskType.VALID, dtype=torch.int8, device=device)
-        fut_is_nan = torch.isnan(fut_values)
-        if fut_is_nan.any():
-            fut_mask = fut_mask.masked_fill(fut_is_nan, MaskType.MISSING)
-            fut_values = torch.nan_to_num(fut_values, nan=0.0)
-        fut_group = sample_ids.repeat_interleave(n_future).unsqueeze(1).expand(rows, total_len).contiguous()
-        fut_type = torch.full((rows, total_len), VariateType.FUTURE, dtype=torch.long, device=device)
-
-        # Extend target rows over the horizon with WITHHELD so all rows share one width.
-        horizon = total_len - context_len
-        h_values = torch.zeros((n_target, horizon), dtype=variates.dtype, device=device)
-        h_mask = torch.full((n_target, horizon), MaskType.WITHHELD, dtype=torch.int8, device=device)
-        h_group = row_group_ids[:, :1].expand(n_target, horizon)
-        h_type = variate_type[:, :1].expand(n_target, horizon)
+        fut_values, fut_mask, fut_group, fut_type = future_rows
         return cls(
-            variates=torch.cat([torch.cat([variates, h_values], dim=1), fut_values], dim=0),
-            mask=torch.cat([torch.cat([target_mask, h_mask], dim=1), fut_mask], dim=0),
-            group_ids=torch.cat([torch.cat([row_group_ids, h_group], dim=1), fut_group], dim=0),
-            variate_type=torch.cat([torch.cat([variate_type, h_type], dim=1), fut_type], dim=0),
+            variates=torch.cat([variates, fut_values], dim=0),
+            mask=torch.cat([target_mask, fut_mask], dim=0),
+            group_ids=torch.cat([row_group_ids, fut_group], dim=0),
+            variate_type=torch.cat([variate_type, fut_type], dim=0),
         )
 
     @classmethod
@@ -268,6 +299,47 @@ class TimeSeries:
             group_offset += len(unique_groups)
 
         return cls(variates=variates, mask=mask, group_ids=group_ids, variate_type=variate_type)
+
+
+def time_series_from_array(
+    context,
+    horizon: int,
+    device: torch.device,
+    future_covariates=None,
+    mask=None,
+    group_ids=None,
+) -> tuple["TimeSeries", tuple[int, int] | None]:
+    """Build a ``TimeSeries`` from a raw context array, with the batch shape to restore."""
+    context_t = torch.as_tensor(context)
+    if context_t.ndim == 1:
+        context_t = context_t.unsqueeze(0)
+    if context_t.ndim not in (2, 3):
+        raise ValueError(f"context must be [T], [B, T] or [B, V, T]; got shape {tuple(context_t.shape)}")
+    context_t = context_t.to(device=device, dtype=torch.float32)
+
+    future_t = None
+    if future_covariates is not None:
+        future_t = torch.as_tensor(future_covariates)
+        expected_len = context_t.shape[-1] + horizon
+        if future_t.ndim != 3 or future_t.shape[0] != context_t.shape[0] or future_t.shape[2] != expected_len:
+            raise ValueError(
+                f"future_covariates must be [B={context_t.shape[0]}, F, T+horizon={expected_len}]; "
+                f"got shape {tuple(future_t.shape)}"
+            )
+        future_t = future_t.to(device=device, dtype=torch.float32)
+
+    group_t = None if group_ids is None else torch.as_tensor(group_ids).to(device=device)
+
+    mask_t = None
+    if mask is not None:
+        mask_t = torch.as_tensor(mask)
+        # Mirror the 1-D promotion applied to `context` so the shapes line up.
+        if mask_t.ndim == 1:
+            mask_t = mask_t.unsqueeze(0)
+        mask_t = mask_t.to(device=device)
+
+    batch_shape = context_t.shape[:2] if context_t.ndim == 3 else None
+    return TimeSeries.from_array(context_t, future_t, mask=mask_t, group_ids=group_t), batch_shape
 
 
 def batch_series(

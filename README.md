@@ -95,8 +95,8 @@ out.median     # (4, 64)
 ```
 
 `predict` accepts `numpy` arrays. 1-D contexts are auto-promoted to a
-single-row batch. NaN in the context is read as a missing observation; to
-say that some cells are padding instead, pass a `mask` — see
+single-row batch. NaN in the context is read as a missing observation. To
+say that some cells are padding instead, pass a `mask`. See
 [batched inference](#batched-inference).
 
 ### Forecasting with covariates
@@ -105,7 +105,7 @@ Anything you know over the **past** goes in `context` — alongside the
 target, extra variates attend to it and are forecast together. Anything
 you know over the **future** (calendar features, planned promotions,
 weather forecasts) goes in `future_covariates`, shaped
-`[B, F, context + horizon]`; the model conditions on it but does not
+`[B, F, context + horizon]`. The model conditions on it but does not
 forecast it.
 
 ```python
@@ -164,7 +164,7 @@ first = TimeSeries.from_array(context_1, future_covariates_1)
 second = TimeSeries.from_array(context_2, future_covariates_2)
 batch = TimeSeries.batch([first, second])
 
-out = model.predict_from_time_series(
+out = model.predict(
     batch,
     horizon=64,
     context_length=max(context_1.shape[-1], context_2.shape[-1]),
@@ -174,6 +174,30 @@ out = model.predict_from_time_series(
 Here each context includes its batch axis, for example `[1, V, T]`, and each
 known-future input is `[1, F, T + horizon]`. The output is ordered by the
 flattened target rows in `batch`.
+
+### Converting your data to `TimeSeries`
+
+`TimeSeries` is the model's native input. It holds target rows, known-future
+covariate rows, a mask and group ids, all on one width. `predict` builds one for
+you from a raw array. You only need to construct one yourself to batch inputs of
+different widths, or to call `forward` directly.
+
+```python
+from t0 import TimeSeries
+
+# context only, with `horizon` marking the region to predict
+model_input = TimeSeries.from_array(context, horizon=24)          # context: [B, V, T]
+
+# with known-future covariates, whose width sets the horizon
+model_input = TimeSeries.from_array(context, future_covariates)   # covariates: [B, F, T + 24]
+
+out = model.predict(model_input, horizon=24, quantiles=[0.1, 0.5, 0.9])
+```
+
+`predict` infers `context_length` from where the forecast region starts. Pass it
+explicitly when batching series of different widths. `forward` takes the same
+`TimeSeries` and runs a single differentiable pass over it, with no rollout. That
+is the entry point for fine-tuning.
 
 **For efficient inference at scale, look at
 [Retrocast](https://app.retrocast.com/).**
@@ -214,20 +238,21 @@ Apache-2.0.
 ## 🧰 Public API
 
 - `T0Forecaster` — `nn.Module` with `from_pretrained` /
-  `save_pretrained` (via `huggingface_hub.PyTorchModelHubMixin`) and the
-  user-facing `predict(context, horizon, quantiles, future_covariates,
-  mask, group_ids)`.
+  `save_pretrained` (via `huggingface_hub.PyTorchModelHubMixin`). It has two
+  forecasting entry points. `forward(model_input)` runs a single differentiable
+  pass with no rollout. `predict(model_input, horizon, quantiles, ...)` is
+  inference-only and rolls out autoregressively past `max_horizon`.
 - `Forecast` — the object returned by the model.
-- `T0Config` — the configuration of the model; `T0Config.medium()` is the
+- `T0Config` — the configuration of the model. `T0Config.medium()` is the
   published one.
 - `MaskType` — the reason a time step is masked out: `PAD` (a cell that
   only widens a shorter series out to the batch's width) or `MISSING` (an
   absent observation).
 - `batch_series` — utility to batch time series of potentially different
   lengths.
-- `TimeSeries.from_array` / `TimeSeries.batch` / `T0Forecaster.predict_from_time_series` —
-  lower-level integration API for batching complete T0 inputs, including
-  known-future covariates.
+- `TimeSeries.from_array` / `TimeSeries.batch` — build the model's native
+  input, including known-future covariates and an explicit forecast
+  `horizon`. `predict` accepts either a `TimeSeries` or a raw context array.
 
 ## 📚 Citation
 
