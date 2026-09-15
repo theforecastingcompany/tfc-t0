@@ -4,13 +4,18 @@
 # Copyright 2025 Datadog, Inc.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Transformer backbone and ``predict`` API for the open-weights t0-alpha model."""
+"""Transformer backbone for the open-weights t0-alpha model.
+
+``T0Forecaster.forward`` runs one differentiable pass; ``T0Forecaster.predict`` wraps it
+with scaling, rollout and inference mode.
+"""
 
 import contextlib
 import dataclasses
 import logging
 import sys
 from collections.abc import Sequence
+from typing import overload
 
 import numpy as np
 import torch
@@ -20,7 +25,7 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 from t0.config import T0Config
-from t0.data import TimeSeries
+from t0.data import TimeSeries, VariateType, time_series_from_array
 from t0.mask import MaskBuilder
 from t0.model.layers import PatchEncoder, Patcher, QuantileHead, ResidualBlock, Transformer
 from t0.model.rollout import RolloutManager
@@ -166,49 +171,8 @@ class T0Forecaster(
         decoded = self.decoder(embeddings).unflatten(-1, (self.patch_size, self.head.n_quantiles))
         return self.head(decoded)
 
-    @torch.inference_mode()
-    def predict(
-        self,
-        context: Float[Tensor, "batch time"]
-        | Float[Tensor, "batch variates time"]
-        | Float[np.ndarray, "batch time"]
-        | Float[np.ndarray, "batch variates time"],
-        horizon: int,
-        quantiles: Sequence[float] = (0.1, 0.5, 0.9),
-        future_covariates: Float[Tensor, "batch future_variates context_plus_horizon"]
-        | Float[np.ndarray, "batch future_variates context_plus_horizon"]
-        | None = None,
-        mask: Int[Tensor, "*batch time"] | Int[np.ndarray, "*batch time"] | None = None,
-        group_ids: Int[Tensor, " rows"] | Int[np.ndarray, " rows"] | None = None,
-    ) -> Forecast:
-        """Forecast ``horizon`` future timesteps for a batch of series.
-
-        Args:
-            context: Past observations — ``[T]`` / ``[B, T]`` (independent
-                univariate series) or ``[B, V, T]`` (multivariate, jointly
-                forecast). NaN marks a missing observation unless ``mask`` says
-                otherwise.
-            horizon: Number of future timesteps to forecast.
-            quantiles: Quantile levels to return, sorted ascending in
-                ``(0, 1)``; levels the model wasn't trained on are interpolated.
-            future_covariates: Optional ``[B, F, T + horizon]`` covariates known
-                over the context and horizon (e.g. calendar features);
-                conditioned on but not forecast. NaN over the horizon is 0.
-            mask: ``MaskType`` values shaped like ``context``: ``MISSING`` for an
-                absent observation, ``PAD`` for a cell that only pads a shorter
-                series out to the batch's width.
-                Defaults to reading every NaN in ``context`` as a missing observation.
-                Only all-``PAD`` patches are left unattended.
-            group_ids: One id per row of the context — per row of a ``[B, T]``
-                one, per sample-variate row of a ``[B, V, T]`` one — marking
-                which rows are variates of the same series; rows sharing an id
-                are forecast jointly. Defaults to one series per sample. Cannot
-                be combined with ``future_covariates``.
-
-        Returns:
-            A forecast with quantiles shaped ``[B, horizon, Q]`` or
-            ``[B, V, horizon, Q]`` — float32, finite, on the model's device.
-        """
+    @staticmethod
+    def _validate_prediction_args(horizon: int, quantiles: Sequence[float]) -> None:
         if horizon < 1:
             raise ValueError(f"horizon must be >= 1, got {horizon}")
         if not quantiles:
@@ -219,40 +183,112 @@ class T0Forecaster(
         if list(quantiles) != sorted(set(quantiles)):
             raise ValueError(f"quantiles must be sorted ascending without duplicates; got {list(quantiles)}")
 
-        context_t = torch.as_tensor(context)
-        if context_t.ndim == 1:
-            context_t = context_t.unsqueeze(0)
-        if context_t.ndim not in (2, 3):
-            raise ValueError(f"context must be [T], [B, T] or [B, V, T]; got shape {tuple(context_t.shape)}")
+    @overload
+    def predict(
+        self,
+        model_input: TimeSeries,
+        horizon: int,
+        quantiles: Sequence[float] = ...,
+        *,
+        context_length: int | None = ...,
+    ) -> Forecast: ...
+
+    @overload
+    def predict(
+        self,
+        model_input: Float[Tensor, "batch time"]
+        | Float[Tensor, "batch variates time"]
+        | Float[np.ndarray, "batch time"]
+        | Float[np.ndarray, "batch variates time"],
+        horizon: int,
+        quantiles: Sequence[float] = ...,
+        *,
+        future_covariates: Float[Tensor, "batch future_variates context_plus_horizon"]
+        | Float[np.ndarray, "batch future_variates context_plus_horizon"]
+        | None = ...,
+        mask: Int[Tensor, "*batch time"] | Int[np.ndarray, "*batch time"] | None = ...,
+        group_ids: Int[Tensor, " rows"] | Int[np.ndarray, " rows"] | None = ...,
+    ) -> Forecast: ...
+
+    @torch.inference_mode()
+    def predict(
+        self,
+        model_input,
+        horizon: int,
+        quantiles: Sequence[float] = (0.1, 0.5, 0.9),
+        *,
+        context_length: int | None = None,
+        future_covariates=None,
+        mask=None,
+        group_ids=None,
+    ) -> Forecast:
+        """Forecast ``horizon`` future timesteps, continuing auto-regressively past ``max_horizon``.
+
+        Args:
+            model_input: A ``TimeSeries``, or past observations as ``[T]`` / ``[B, T]``
+                (independent univariate series) or ``[B, V, T]`` (multivariate, jointly
+                forecast). An array is converted with ``TimeSeries.from_array``. NaN marks a
+                missing observation unless ``mask`` says otherwise.
+            horizon: Number of future timesteps to forecast.
+            quantiles: Quantile levels to return, sorted ascending in ``(0, 1)``; levels the
+                model wasn't trained on are interpolated.
+            context_length: Width of the right-aligned historical context. Defaults to the
+                start of the forecast region.
+            future_covariates: Array inputs only. ``[B, F, T + horizon]`` covariates known over
+                the context and horizon (e.g. calendar features); conditioned on but not
+                forecast. NaN over the horizon is 0.
+            mask: Array inputs only. ``MaskType`` values shaped like the context: ``MISSING``
+                for an absent observation, ``PAD`` for a cell that only pads a shorter series
+                out to the batch's width. Defaults to reading every NaN as missing. Only
+                all-``PAD`` patches are left unattended.
+            group_ids: Array inputs only. One id per context row, marking which rows are
+                variates of the same series; rows sharing an id are forecast jointly. Defaults
+                to one series per sample. Cannot be combined with ``future_covariates``.
+
+        Returns:
+            Quantiles shaped ``[B, horizon, Q]`` or ``[B, V, horizon, Q]`` for array inputs,
+            and ``[target_rows, horizon, Q]`` -- the input's row order -- for a ``TimeSeries``.
+            Always float32, finite, on the model's device.
+
+        Raises:
+            ValueError: ``horizon`` or ``quantiles`` are out of range, ``context_length`` does
+                not fit the input width, the input has no target row, or an array-only
+                argument is passed alongside a ``TimeSeries``.
+        """
+        self._validate_prediction_args(horizon, quantiles)
         device = next(self.parameters()).device
-        context_t = context_t.to(device=device, dtype=torch.float32)
+        batch_shape = None
 
-        future_t = None
-        if future_covariates is not None:
-            future_t = torch.as_tensor(future_covariates)
-            expected_len = context_t.shape[-1] + horizon
-            if future_t.ndim != 3 or future_t.shape[0] != context_t.shape[0] or future_t.shape[2] != expected_len:
-                raise ValueError(
-                    f"future_covariates must be [B={context_t.shape[0]}, F, T+horizon={expected_len}]; "
-                    f"got shape {tuple(future_t.shape)}"
-                )
-            future_t = future_t.to(device=device, dtype=torch.float32)
+        if isinstance(model_input, TimeSeries):
+            for name, value in (("future_covariates", future_covariates), ("mask", mask), ("group_ids", group_ids)):
+                if value is not None:
+                    raise ValueError(f"{name} applies to array inputs; build it into the TimeSeries instead")
+        else:
+            model_input, batch_shape = time_series_from_array(
+                model_input, horizon, device, future_covariates, mask, group_ids
+            )
 
-        group_t = None
-        if group_ids is not None:
-            group_t = torch.as_tensor(group_ids).to(device=device)
+        model_input = model_input.to(device)
+        if context_length is None:
+            context_length = self.patcher.context_end(model_input)
+        if not 1 <= context_length <= model_input.seq_len:
+            raise ValueError(
+                f"context_length must be between 1 and the input width ({model_input.seq_len}), got {context_length}"
+            )
+        row_types = model_input.variate_type[:, -1]
+        if not (row_types == VariateType.TARGET).any():
+            raise ValueError("model_input must contain at least one target row")
+        # An input either stops at the context or carries the forecast region. Known future
+        # covariates must span that region, so they rule the context-only width out.
+        widths = [context_length + horizon]
+        if not (row_types == VariateType.FUTURE).any():
+            widths.append(context_length)
+        if model_input.seq_len not in widths:
+            raise ValueError(
+                f"model_input width must be {' or '.join(str(w) for w in sorted(widths))} "
+                f"for context_length={context_length} and horizon={horizon}, got {model_input.seq_len}"
+            )
 
-        mask_t = None
-        if mask is not None:
-            mask_t = torch.as_tensor(mask)
-            # Mirror the 1-D promotion applied to `context` so the shapes line up.
-            if mask_t.ndim == 1:
-                mask_t = mask_t.unsqueeze(0)
-            mask_t = mask_t.to(device=device)
-
-        model_input = TimeSeries.from_array(context_t, future_t, mask=mask_t, group_ids=group_t)
-        # Autocast the forward when bf16/fp16 was requested: matmul/linear in
-        # that dtype, softmax/norm in fp32.
         amp_ctx = (
             torch.autocast(device_type=device.type, dtype=self._amp_dtype)
             if self._amp_dtype is not None
@@ -263,11 +299,12 @@ class T0Forecaster(
                 model_input,
                 prediction_length=horizon,
                 query_quantile_levels=torch.tensor(list(quantiles), dtype=torch.float32, device=device),
-                context_length=context_t.shape[-1],
+                context_length=context_length,
             )
-        if context_t.ndim == 3:
-            predictions = predictions.unflatten(0, context_t.shape[:2])
-        return Forecast(quantiles=_sanitize_predictions(predictions), quantile_levels=tuple(quantiles))
+        predictions = _sanitize_predictions(predictions)
+        if batch_shape is not None:
+            predictions = predictions.unflatten(0, batch_shape)
+        return Forecast(quantiles=predictions, quantile_levels=tuple(quantiles))
 
 
 def _sanitize_predictions(predictions: Float[Tensor, "*batch quantiles"]) -> Float[Tensor, "*batch quantiles"]:

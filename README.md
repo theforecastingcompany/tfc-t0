@@ -20,6 +20,26 @@ multiple covariates. `t0-alpha` is our first iteration of the model.
 
 You can use `t0` on [Retrocast](https://app.retrocast.com/), our platform for forecasting on your own data. You can also compare forecast across different open-weight models.
 
+**Model family:** [`t0-alpha` (PyTorch/MLX)](https://huggingface.co/theforecastingcompany/t0-alpha) · [ONNX FP16](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) · [ONNX INT8](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) · [Collection](https://huggingface.co/collections/theforecastingcompany/t0-alpha-model-family-6a99be18a9e3ab245fda8501)
+
+## Choose how to run `t0-alpha`
+
+This repository contains the first-party PyTorch and MLX runtimes, published
+as separate packages so each installation keeps only its native tensor
+backend. ONNX artifacts and our managed API cover other deployment targets:
+
+| Use case | Install or open |
+| --- | --- |
+| Local inference with PyTorch | `pip install tfc-t0` |
+| Local inference on Apple silicon with MLX | `pip install tfc-t0-mlx` |
+| Accelerator-oriented local and edge inference with ONNX FP16 | [`t0-alpha-onnx-fp16`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) |
+| CPU and in-browser inference with ONNX INT8 | [`t0-alpha-onnx-int8`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) |
+| Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com/documentation/t0-alpha) |
+
+The MLX runtime lives in [`mlx/`](mlx/). It is inference-only, has a closely
+matched `T0Forecaster.predict()` API, loads the same safetensors directly, and
+does not install PyTorch.
+
 ![t0 forecasting French national electricity demand in Retrocast](https://raw.githubusercontent.com/theforecastingcompany/tfc-t0/main/assets/enedis_with_holidays.webp)
 
 _`t0` forecasting French national electricity demand in Retrocast. Data:
@@ -47,13 +67,26 @@ historical and known-future covariates.
 pip install tfc-t0
 ```
 
+The model repository is gated. Before the first download, sign in to
+[the model page](https://huggingface.co/theforecastingcompany/t0-alpha) and
+accept its access conditions. Then authenticate with a token from that same
+account that can read the model:
+
+```bash
+hf auth login
+```
+
+In a notebook, use `from huggingface_hub import login; login()` instead.
+For scripts and CI, set `HF_TOKEN` in the environment. Signing in to the
+website alone does not authenticate your Python environment.
+
 The simplest path is a univariate forecast through `predict`:
 
 ```python
 import torch
 from t0 import T0Forecaster
 
-model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha").eval()
+model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha", token=True).eval()
 
 context = torch.randn(4, 512)  # 4 series, 512 past timesteps
 out = model.predict(context, horizon=64, quantiles=[0.1, 0.5, 0.9])
@@ -62,8 +95,8 @@ out.median     # (4, 64)
 ```
 
 `predict` accepts `numpy` arrays. 1-D contexts are auto-promoted to a
-single-row batch. NaN in the context is read as a missing observation; to
-say that some cells are padding instead, pass a `mask` — see
+single-row batch. NaN in the context is read as a missing observation. To
+say that some cells are padding instead, pass a `mask`. See
 [batched inference](#batched-inference).
 
 ### Forecasting with covariates
@@ -72,7 +105,7 @@ Anything you know over the **past** goes in `context` — alongside the
 target, extra variates attend to it and are forecast together. Anything
 you know over the **future** (calendar features, planned promotions,
 weather forecasts) goes in `future_covariates`, shaped
-`[B, F, context + horizon]`; the model conditions on it but does not
+`[B, F, context + horizon]`. The model conditions on it but does not
 forecast it.
 
 ```python
@@ -121,6 +154,51 @@ out.quantiles  # (4, 24, 3)
 out.median[0]  # the 24-step median forecast for `daily`
 ```
 
+Integrations that prepare complete T0 inputs, including known-future
+covariates, can batch the native representation directly:
+
+```python
+from t0 import TimeSeries
+
+first = TimeSeries.from_array(context_1, future_covariates_1)
+second = TimeSeries.from_array(context_2, future_covariates_2)
+batch = TimeSeries.batch([first, second])
+
+out = model.predict(
+    batch,
+    horizon=64,
+    context_length=max(context_1.shape[-1], context_2.shape[-1]),
+)
+```
+
+Here each context includes its batch axis, for example `[1, V, T]`, and each
+known-future input is `[1, F, T + horizon]`. The output is ordered by the
+flattened target rows in `batch`.
+
+### Converting your data to `TimeSeries`
+
+`TimeSeries` is the model's native input. It holds target rows, known-future
+covariate rows, a mask and group ids, all on one width. `predict` builds one for
+you from a raw array. You only need to construct one yourself to batch inputs of
+different widths, or to call `forward` directly.
+
+```python
+from t0 import TimeSeries
+
+# context only, with `horizon` marking the region to predict
+model_input = TimeSeries.from_array(context, horizon=24)          # context: [B, V, T]
+
+# with known-future covariates, whose width sets the horizon
+model_input = TimeSeries.from_array(context, future_covariates)   # covariates: [B, F, T + 24]
+
+out = model.predict(model_input, horizon=24, quantiles=[0.1, 0.5, 0.9])
+```
+
+`predict` infers `context_length` from where the forecast region starts. Pass it
+explicitly when batching series of different widths. `forward` takes the same
+`TimeSeries` and runs a single differentiable pass over it, with no rollout. That
+is the entry point for fine-tuning.
+
 **For efficient inference at scale, look at
 [Retrocast](https://app.retrocast.com/).**
 
@@ -160,17 +238,21 @@ Apache-2.0.
 ## 🧰 Public API
 
 - `T0Forecaster` — `nn.Module` with `from_pretrained` /
-  `save_pretrained` (via `huggingface_hub.PyTorchModelHubMixin`) and the
-  user-facing `predict(context, horizon, quantiles, future_covariates,
-  mask, group_ids)`.
+  `save_pretrained` (via `huggingface_hub.PyTorchModelHubMixin`). It has two
+  forecasting entry points. `forward(model_input)` runs a single differentiable
+  pass with no rollout. `predict(model_input, horizon, quantiles, ...)` is
+  inference-only and rolls out autoregressively past `max_horizon`.
 - `Forecast` — the object returned by the model.
-- `T0Config` — the configuration of the model; `T0Config.medium()` is the
+- `T0Config` — the configuration of the model. `T0Config.medium()` is the
   published one.
 - `MaskType` — the reason a time step is masked out: `PAD` (a cell that
   only widens a shorter series out to the batch's width) or `MISSING` (an
   absent observation).
 - `batch_series` — utility to batch time series of potentially different
   lengths.
+- `TimeSeries.from_array` / `TimeSeries.batch` — build the model's native
+  input, including known-future covariates and an explicit forecast
+  `horizon`. `predict` accepts either a `TimeSeries` or a raw context array.
 
 ## 📚 Citation
 

@@ -1,6 +1,6 @@
 [project]
 name = "tfc-t0"
-version = "0.3.1"
+version = "0.4.0"
 description = "Open-weights time-series forecasting foundation model from The Forecasting Company"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -127,6 +127,10 @@ build-backend = "hatchling.build"
 # tests (tests/) are deliberately excluded — guarded by test_wheel.py.
 # LICENSE + NOTICE are picked up automatically via [project.license-files].
 packages = ["t0"]
+
+[tool.hatch.build.targets.sdist]
+# The MLX runtime is a separate distribution built from mlx/pyproject.toml.
+exclude = ["/mlx"]
 
 [tool.ruff]
 line-length = 120

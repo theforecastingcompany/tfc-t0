@@ -4,6 +4,51 @@ All notable changes to `tfc-t0` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.4.0] - 2026-09-15
+
+Breaking. `T0Forecaster` now has two forecasting methods instead of four.
+
+### Changed
+- `forward(model_input)` runs a single differentiable pass over a `TimeSeries`, with
+  no rollout. Use it to fine-tune.
+- `predict(model_input, horizon, quantiles, ...)` is inference-only and rolls out
+  autoregressively past `max_horizon`. It takes a `TimeSeries`, and still converts a
+  raw context array on the fly, so array callers are unaffected.
+- `context_length` is optional and defaults to the start of the forecast region.
+- `prepare_rollout_buffer` and `predict_step` are internal to `RolloutManager` again.
+
+### Removed
+- `predict_from_time_series`. Replace `predict_from_time_series(ts, h, ctx, q)` with
+  `predict(ts, h, q, context_length=ctx)`.
+
+### Fixed
+- `Patcher.pad` aligned the patch grid to the input's total width rather than to the
+  context boundary. It now left-pads to the context boundary and right-pads the
+  forecast region to whole patches. `predict` was never affected, because
+  `RolloutManager` already aligned its buffer. Calling `forward` directly with
+  known-future covariates returned a wrong forecast that still looked valid. On
+  `t0-alpha` with a 24-step context and a 12-step horizon it moved MAE from 3.72 to 8.32.
+
+### Added
+- `horizon` on `TimeSeries.from_array`, extending the target rows with that many
+  `WITHHELD` steps to mark the region to predict. Future covariates imply it from
+  their width.
+- `Patcher.context_end`, the index where the forecast region begins.
+- `time_series_from_array` in `t0.data`, to build a `TimeSeries` from a raw context array.
+- Gradient tests in `tests/test_forward.py` and doctests on `Patcher.pad`.
+
+## [0.3.2] - 2026-09-09
+
+### Added
+- `TimeSeries.batch` and `T0Forecaster.predict_from_time_series` for integrations
+  that construct complete T0 inputs, including known-future covariates.
+
+### Fixed
+- Document the model-access and authentication steps before the PyTorch
+  quickstart in the README and model card.
+
 ## [0.3.1] - 2026-09-01
 
 Documentation-only release.
