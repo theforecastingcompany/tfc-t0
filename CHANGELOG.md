@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-17
+
+Adds support for `t0-beta`, the 256M-parameter second public checkpoint.
+Earlier releases load its weights without error but run them under
+`t0-alpha`'s normalization, which silently degrades the forecast — this is the
+minimum version that serves it correctly.
+
+### Added
+
+- `T0Config.large()`, the 256M-parameter configuration published as `t0-beta`:
+  `embed_dim` 1024 and a 21-level quantile head spanning 0.01 to 0.99.
+- `scaler_eps` and `scaler_eps_mode` on `T0Config`, so the convention a
+  checkpoint was trained under travels in its `config.json`.
+  `"variance_offset"` computes `sqrt(variance + eps)` and `"std_clamp"`
+  computes `sqrt(variance).clamp(min=eps)`; the two agree wherever a series'
+  local standard deviation sits well above `eps` and diverge below it, so a
+  checkpoint is only valid under the one it trained with. The defaults
+  reproduce `t0-alpha`, whose published `config.json` predates both fields.
+
 ### Changed
 
 - **Breaking.** `T0Forecaster.predict`'s `quantiles` argument is now

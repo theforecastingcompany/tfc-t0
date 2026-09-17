@@ -16,13 +16,15 @@
 Open-weights time-series forecasting foundation model from [The Forecasting Company](https://theforecastingcompany.com/).
 `t0` is a transformer-based model that
 produces probabilistic multi-horizon forecasts and natively operates on
-multiple covariates. `t0-alpha` is our first iteration of the model.
+multiple covariates. `t0-beta` is the current iteration: 256M parameters,
+21 natively predicted quantile levels, and an incremental improvement over
+`t0-alpha`.
 
 You can use `t0` on [Retrocast](https://app.retrocast.com/), our platform for forecasting on your own data. You can also compare forecast across different open-weight models.
 
-**Model family:** [`t0-alpha` (PyTorch/MLX)](https://huggingface.co/theforecastingcompany/t0-alpha) · [ONNX FP16](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) · [ONNX INT8](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) · [Collection](https://huggingface.co/collections/theforecastingcompany/t0-alpha-model-family-6a99be18a9e3ab245fda8501)
+**Model family:** [`t0-beta` (PyTorch/MLX)](https://huggingface.co/theforecastingcompany/t0-beta) · [`t0-alpha`](https://huggingface.co/theforecastingcompany/t0-alpha) · [Collection](https://huggingface.co/collections/theforecastingcompany/t0-alpha-model-family-6a99be18a9e3ab245fda8501)
 
-## Choose how to run `t0-alpha`
+## Choose how to run `t0-beta`
 
 This repository contains the first-party PyTorch and MLX runtimes, published
 as separate packages so each installation keeps only its native tensor
@@ -30,11 +32,14 @@ backend. ONNX artifacts and our managed API cover other deployment targets:
 
 | Use case | Install or open |
 | --- | --- |
-| Local inference with PyTorch | `pip install tfc-t0` |
-| Local inference on Apple silicon with MLX | `pip install tfc-t0-mlx` |
+| Local inference with PyTorch | `pip install "tfc-t0>=0.5.0"` |
+| Local inference on Apple silicon with MLX | `pip install "tfc-t0-mlx>=0.1.0"` |
 | Accelerator-oriented local and edge inference with ONNX FP16 | [`t0-alpha-onnx-fp16`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) |
 | CPU and in-browser inference with ONNX INT8 | [`t0-alpha-onnx-int8`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) |
 | Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com/documentation/t0-alpha) |
+
+The ONNX artifacts are built from `t0-alpha`; there is no `t0-beta` ONNX
+export yet.
 
 The MLX runtime lives in [`mlx/`](mlx/). It is inference-only, has a closely
 matched `T0Forecaster.predict()` API, loads the same safetensors directly, and
@@ -64,21 +69,14 @@ historical and known-future covariates.
 ## 🚀 Quickstart
 
 ```bash
-pip install tfc-t0
+pip install "tfc-t0>=0.5.0"
 ```
 
-The model repository is gated. Before the first download, sign in to
-[the model page](https://huggingface.co/theforecastingcompany/t0-alpha) and
-accept its access conditions. Then authenticate with a token from that same
-account that can read the model:
-
-```bash
-hf auth login
-```
-
-In a notebook, use `from huggingface_hub import login; login()` instead.
-For scripts and CI, set `HF_TOKEN` in the environment. Signing in to the
-website alone does not authenticate your Python environment.
+`t0-beta` normalizes its inputs differently from `t0-alpha`, and carries the
+convention in `config.json` as `scaler_eps` and `scaler_eps_mode`. Releases
+before 0.5.0 do not read those fields: they load these weights without error
+and run them under `t0-alpha`'s normalization, which silently degrades the
+forecast. Pin the floor.
 
 The simplest path is a univariate forecast through `predict`:
 
@@ -86,7 +84,7 @@ The simplest path is a univariate forecast through `predict`:
 import torch
 from t0 import T0Forecaster
 
-model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha", token=True).eval()
+model = T0Forecaster.from_pretrained("theforecastingcompany/t0-beta").eval()
 
 context = torch.randn(4, 512)  # 4 series, 512 past timesteps
 out = model.predict(context, horizon=64, quantile_levels=[0.1, 0.5, 0.9])
@@ -98,6 +96,12 @@ out.median     # (4, 64)
 single-row batch. NaN in the context is read as a missing observation. To
 say that some cells are padding instead, pass a `mask`. See
 [batched inference](#batched-inference).
+
+`t0-beta` downloads without authentication. `t0-alpha` is gated: sign in to
+[its model page](https://huggingface.co/theforecastingcompany/t0-alpha),
+accept the access conditions, then run `hf auth login` (or, in a notebook,
+`from huggingface_hub import login; login()`) and pass `token=True` to
+`from_pretrained`.
 
 ### Forecasting with covariates
 
@@ -112,7 +116,7 @@ forecast it.
 import torch
 from t0 import T0Forecaster
 
-model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha").eval()
+model = T0Forecaster.from_pretrained("theforecastingcompany/t0-beta").eval()
 
 context = torch.randn(2, 512)                    # 2 series, 512 past timesteps
 future_covariates = torch.randn(2, 3, 512 + 64)  # 3 covariates known over context + horizon
@@ -133,7 +137,7 @@ out.median     # (2, 64)
 import numpy as np
 from t0 import T0Forecaster, batch_series
 
-model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha").eval()
+model = T0Forecaster.from_pretrained("theforecastingcompany/t0-beta").eval()
 
 daily = np.random.randn(180)    # one series, 180 past timesteps
 store = np.random.randn(2, 96)  # one series of 2 variates, 96 past timesteps
@@ -205,20 +209,21 @@ is the entry point for fine-tuning.
 ## 🏗️ Architecture
 
 `t0` is a decoder-style patch transformer that alternates time and
-covariate attention layers. It predicts 5 quantiles (0.1, 0.25, 0.5,
-0.75, 0.9), decoding multiple horizons in parallel — up to 1024
-timesteps in one forward pass — and falling back on autoregressive
-rollout for longer horizons.
+covariate attention layers. It decodes multiple horizons in parallel — up
+to 1024 timesteps in one forward pass — and falls back on autoregressive
+rollout for longer horizons. Quantile levels between the trained ones are
+interpolated, and levels beyond them extrapolated on exponential tails.
 
-|                 |                           |
-| --------------- | ------------------------- |
-| Parameters      | ~102M                     |
-| Layers          | 24                        |
-| Embedding dim   | 512                       |
-| Feedforward dim | 2048                      |
-| Attention heads | 8                         |
-| Patch size      | 32                        |
-| Quantile levels | 0.1, 0.25, 0.5, 0.75, 0.9 |
+|                 | `t0-beta`                    | `t0-alpha`                |
+| --------------- | ---------------------------- | ------------------------- |
+| Parameters      | ~256M                        | ~102M                     |
+| Layers          | 24                           | 24                        |
+| Embedding dim   | 1024                         | 512                       |
+| Feedforward dim | 2048                         | 2048                      |
+| Attention heads | 8                            | 8                         |
+| Patch size      | 32                           | 32                        |
+| Quantile levels | 21, from 0.01 to 0.99        | 0.1, 0.25, 0.5, 0.75, 0.9 |
+| `T0Config`      | `T0Config.large()`           | `T0Config.medium()`       |
 
 ### 🧬 Lineage
 
@@ -240,11 +245,11 @@ Apache-2.0.
 - `T0Forecaster` — `nn.Module` with `from_pretrained` /
   `save_pretrained` (via `huggingface_hub.PyTorchModelHubMixin`). It has two
   forecasting entry points. `forward(model_input)` runs a single differentiable
-  pass with no rollout. `predict(model_input, horizon, quantiles, ...)` is
+  pass with no rollout. `predict(model_input, horizon, quantile_levels, ...)` is
   inference-only and rolls out autoregressively past `max_horizon`.
 - `Forecast` — the object returned by the model.
-- `T0Config` — the configuration of the model. `T0Config.medium()` is the
-  published one.
+- `T0Config` — the configuration of the model. `T0Config.large()` is
+  `t0-beta`; `T0Config.medium()` is `t0-alpha`.
 - `MaskType` — the reason a time step is masked out: `PAD` (a cell that
   only widens a shorter series out to the batch's width) or `MISSING` (an
   absent observation).
@@ -263,7 +268,7 @@ If our model is useful, please use the following citation and star our repo!
   title  = {t0: A time-series forecasting foundation model},
   author = {The Forecasting Company},
   year   = {2026},
-  url    = {https://huggingface.co/theforecastingcompany/t0-alpha},
+  url    = {https://huggingface.co/theforecastingcompany/t0-beta},
 }
 ```
 

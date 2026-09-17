@@ -1,6 +1,6 @@
 [project]
 name = "tfc-t0"
-version = "0.4.0"
+version = "0.5.0"
 description = "Open-weights time-series forecasting foundation model from The Forecasting Company"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -69,10 +69,10 @@ plot = ["matplotlib>=3.8"]
 notebooks = ["peft>=0.11", "accelerate>=0.30", "ipykernel>=6.29", "matplotlib>=3.8", "pandas>=2", "pyarrow>=14"]
 
 [project.urls]
-Homepage = "https://huggingface.co/theforecastingcompany/t0-alpha"
+Homepage = "https://huggingface.co/theforecastingcompany/t0-beta"
 Source = "https://github.com/theforecastingcompany/tfc-t0"
 Issues = "https://github.com/theforecastingcompany/tfc-t0/issues"
-Documentation = "https://huggingface.co/theforecastingcompany/t0-alpha"
+Documentation = "https://huggingface.co/theforecastingcompany/t0-beta"
 Changelog = "https://github.com/theforecastingcompany/tfc-t0/blob/main/CHANGELOG.md"
 
 [dependency-groups]

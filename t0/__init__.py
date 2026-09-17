@@ -1,4 +1,4 @@
-"""Open-weights t0-alpha forecasting model."""
+"""Open-weights t0 family of forecasting models."""
 
 from t0.config import T0Config
 from t0.data import MaskType, TimeSeries, VariateType, batch_series
