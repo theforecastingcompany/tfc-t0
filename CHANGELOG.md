@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-17
+
 ### Changed
 
 - **Breaking.** `T0Forecaster.predict`'s `quantiles` argument is now
