@@ -86,7 +86,7 @@ from t0_mlx import T0Forecaster
 model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha").eval()
 
 context = np.random.randn(4, 512).astype(np.float32)  # 4 series, 512 past timesteps
-out = model.predict(context, horizon=64, quantiles=[0.1, 0.5, 0.9])
+out = model.predict(context, horizon=64, quantile_levels=[0.1, 0.5, 0.9])
 out.quantiles.shape  # (4, 64, 3)
 out.median.shape     # (4, 64)
 ```
@@ -123,7 +123,7 @@ future_covariates = np.random.randn(2, 3, 512 + 64).astype(np.float32)
 out = model.predict(
     context,
     horizon=64,
-    quantiles=[0.1, 0.5, 0.9],
+    quantile_levels=[0.1, 0.5, 0.9],
     future_covariates=future_covariates,
 )
 out.quantiles.shape  # (2, 64, 3)
@@ -149,7 +149,7 @@ group_ids      # [0, 1, 1, 2] — `store`'s two variates are forecast jointly
 out = model.predict(
     context,
     horizon=24,
-    quantiles=[0.1, 0.5, 0.9],
+    quantile_levels=[0.1, 0.5, 0.9],
     mask=mask,
     group_ids=group_ids,
 )
@@ -222,9 +222,10 @@ The top-level API mirrors `tfc-t0`:
   lengths.
 
 The runtime supports univariate and multivariate inputs, missing values,
-explicit groups, known-future covariates, requested-quantile interpolation,
-and arbitrary positive horizons. Forecasts beyond the native 1024-step pass
-continue autoregressively, matching `tfc-t0`.
+explicit groups, known-future covariates, requested-quantile interpolation with
+exponential tails beyond the trained range, and arbitrary positive horizons.
+Forecasts beyond the native 1024-step pass continue autoregressively, matching
+`tfc-t0`.
 
 ## Development
 

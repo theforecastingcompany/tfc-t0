@@ -89,7 +89,7 @@ from t0 import T0Forecaster
 model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha", token=True).eval()
 
 context = torch.randn(4, 512)  # 4 series, 512 past timesteps
-out = model.predict(context, horizon=64, quantiles=[0.1, 0.5, 0.9])
+out = model.predict(context, horizon=64, quantile_levels=[0.1, 0.5, 0.9])
 out.quantiles  # (4, 64, 3)
 out.median     # (4, 64)
 ```
@@ -120,7 +120,7 @@ future_covariates = torch.randn(2, 3, 512 + 64)  # 3 covariates known over conte
 out = model.predict(
     context,
     horizon=64,
-    quantiles=[0.1, 0.5, 0.9],
+    quantile_levels=[0.1, 0.5, 0.9],
     future_covariates=future_covariates,
 )
 out.quantiles  # (2, 64, 3)
@@ -146,7 +146,7 @@ group_ids      # [0, 1, 1, 2] — `store`'s two variates are forecast jointly
 out = model.predict(
     context,
     horizon=24,
-    quantiles=[0.1, 0.5, 0.9],
+    quantile_levels=[0.1, 0.5, 0.9],
     mask=mask,
     group_ids=group_ids,
 )
@@ -191,7 +191,7 @@ model_input = TimeSeries.from_array(context, horizon=24)          # context: [B,
 # with known-future covariates, whose width sets the horizon
 model_input = TimeSeries.from_array(context, future_covariates)   # covariates: [B, F, T + 24]
 
-out = model.predict(model_input, horizon=24, quantiles=[0.1, 0.5, 0.9])
+out = model.predict(model_input, horizon=24, quantile_levels=[0.1, 0.5, 0.9])
 ```
 
 `predict` infers `context_length` from where the forecast region starts. Pass it

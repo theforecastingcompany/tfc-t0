@@ -4,6 +4,27 @@ All notable changes to `tfc-t0-mlx` are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking.** `T0Forecaster.predict`'s `quantiles` argument is now
+  `quantile_levels`. It always carried levels rather than quantile values, and
+  the returned `Forecast` already called them `quantile_levels`, so the same
+  concept had two names on either side of one call. Replace
+  `predict(..., quantiles=[0.1, 0.5, 0.9])` with
+  `predict(..., quantile_levels=[0.1, 0.5, 0.9])`. `Forecast.quantiles`, which
+  holds the forecast values, is unchanged.
+
+- Quantile levels requested beyond the trained range (outside [0.1, 0.9]) now
+  follow IQF exponential tails
+  ([Park et al., arXiv 2111.06581](https://arxiv.org/abs/2111.06581)) pinned
+  through the outermost trained levels, instead of clamping flat to the nearest
+  trained level. A requested tail level no longer costs an autoregressive rollout
+  path of its own. Requesting one does add the trained levels it pins through to
+  the rollout, so over horizons long enough to roll out, the other requested
+  levels can shift slightly.
+
 ## [0.1.0a1] - 2026-09-05
 
 ### Fixed

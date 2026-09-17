@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking.** `T0Forecaster.predict`'s `quantiles` argument is now
+  `quantile_levels`. It always carried levels rather than quantile values, and
+  the returned `Forecast` already called them `quantile_levels`, so the same
+  concept had two names on either side of one call. Replace
+  `predict(..., quantiles=[0.1, 0.5, 0.9])` with
+  `predict(..., quantile_levels=[0.1, 0.5, 0.9])`. `Forecast.quantiles`, which
+  holds the forecast values, is unchanged.
+
+- Quantile levels requested beyond the trained range (outside [0.1, 0.9]) now
+  follow IQF exponential tails
+  ([Park et al., arXiv 2111.06581](https://arxiv.org/abs/2111.06581)) pinned
+  through the outermost trained levels, instead of clamping flat to the nearest
+  trained level.
+
 ## [0.4.0] - 2026-09-15
 
 Breaking. `T0Forecaster` now has two forecasting methods instead of four.

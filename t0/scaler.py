@@ -13,6 +13,7 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
+from t0.config import ScalerEpsMode
 from t0.data import TimeSeries, VariateType
 
 logger = logging.getLogger(__name__)
@@ -69,12 +70,16 @@ def _compute_causal_stats(
     x: Float[Tensor, "variates time"],
     mask: Bool[Tensor, "variates time"] | None,
     group_ids: Int[Tensor, "variates time"],
+    eps: float = EPS,
+    eps_mode: ScalerEpsMode = "variance_offset",
 ) -> tuple[Float[Tensor, "variates time"], Float[Tensor, "variates time"]]:
     """Welford causal mean/std along the last dim, resetting at ``group_ids`` boundaries.
 
     For inference inputs (one independent series per row → one segment per
     row) this reduces to plain per-row cumulative Welford. The segment-aware
     machinery is preserved so the same code path serves both flavours.
+
+    ``eps_mode`` selects how ``eps`` is applied — see ``T0Config.scaler_eps_mode``.
     """
     boundary = _group_ids_to_boundary(group_ids)
 
@@ -100,7 +105,7 @@ def _compute_causal_stats(
 
     m_2 = _segmented_cumsum(increment, boundary).clamp(min=0.0)
     variance = m_2 / (cumcount_safe - 1.0).clamp(min=1.0)
-    stds = torch.sqrt(variance + EPS)
+    stds = torch.sqrt(variance + eps) if eps_mode == "variance_offset" else variance.sqrt().clamp(min=eps)
     return means, stds
 
 
@@ -108,8 +113,12 @@ def _compute_global_stats(
     x: Float[Tensor, "variates time"],
     mask: Bool[Tensor, "variates time"],
     group_ids: Int[Tensor, "variates time"],
+    eps: float = EPS,
 ) -> tuple[Float[Tensor, "variates time"], Float[Tensor, "variates time"]]:
-    """Per-segment global (non-causal) mean and std, broadcast back to ``(V, T)``."""
+    """Per-segment global (non-causal) mean and std, broadcast back to ``(V, T)``.
+
+    ``eps`` is always applied as a lower bound on the standard deviation.
+    """
     boundary = _group_ids_to_boundary(group_ids)
     segment_ids = boundary.long().cumsum(dim=-1) - 1
     max_segments = int(segment_ids.max().item()) + 1
@@ -134,7 +143,7 @@ def _compute_global_stats(
     seg_sq_sum = torch.zeros(v, max_segments, device=device, dtype=dtype)
     seg_sq_sum.scatter_add_(1, segment_ids, squared_diff)
     seg_var = seg_sq_sum / seg_count.clamp(min=2.0)
-    seg_std = seg_var.sqrt().clamp(min=EPS)
+    seg_std = seg_var.sqrt().clamp(min=eps)
     pos_std = seg_std.gather(1, segment_ids)
     return pos_mean, pos_std
 
@@ -146,16 +155,27 @@ class CausalScaler(torch.nn.Module):
     per-row global stats. Optionally applies arcsinh after the standard
     ``(x - loc) / scale`` step (novel to t0-alpha, helps with extreme outliers).
 
+    ``eps`` and ``eps_mode`` must match what the checkpoint was trained with;
+    ``T0Forecaster`` takes both from its ``T0Config``.
+
     Stateless: zero parameters, zero buffers, contributes nothing to
     ``state_dict``.
     """
 
-    def __init__(self, patch_size: int = 1, use_arcsinh: bool = False):
+    def __init__(
+        self,
+        patch_size: int = 1,
+        use_arcsinh: bool = False,
+        eps: float = EPS,
+        eps_mode: ScalerEpsMode = "variance_offset",
+    ):
         super().__init__()
         if patch_size < 1:
             raise ValueError(f"patch_size must be >= 1, got {patch_size}")
         self.patch_size = patch_size
         self.use_arcsinh = use_arcsinh
+        self.eps = eps
+        self.eps_mode = eps_mode
 
     def scale_input(
         self,
@@ -175,11 +195,13 @@ class CausalScaler(torch.nn.Module):
         scale = torch.ones(v, t, device=variates.device, dtype=variates.dtype)
 
         if is_causal.any():
-            causal_loc, causal_scale = _compute_causal_stats(variates, mask=invalid, group_ids=group_ids)
+            causal_loc, causal_scale = _compute_causal_stats(
+                variates, mask=invalid, group_ids=group_ids, eps=self.eps, eps_mode=self.eps_mode
+            )
             loc = torch.where(is_causal, causal_loc, loc)
             scale = torch.where(is_causal, causal_scale, scale)
         if is_future.any():
-            future_loc, future_scale = _compute_global_stats(variates, mask=invalid, group_ids=group_ids)
+            future_loc, future_scale = _compute_global_stats(variates, mask=invalid, group_ids=group_ids, eps=self.eps)
             loc = torch.where(is_future, future_loc, loc)
             scale = torch.where(is_future, future_scale, scale)
 

@@ -66,7 +66,7 @@ def test_predict_matches_public_shape_contract(tiny_model: T0Forecaster) -> None
 
 
 def test_predict_accepts_one_dimensional_context(tiny_model: T0Forecaster) -> None:
-    forecast = tiny_model.predict([1.0, 2.0, 3.0], horizon=2, quantiles=[0.5])
+    forecast = tiny_model.predict([1.0, 2.0, 3.0], horizon=2, quantile_levels=[0.5])
     assert forecast.quantiles.shape == (1, 2, 1)
 
 

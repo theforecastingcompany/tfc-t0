@@ -24,12 +24,12 @@ from huggingface_hub import PyTorchModelHubMixin
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from t0.config import T0Config
+from t0.config import ScalerEpsMode, T0Config
 from t0.data import TimeSeries, VariateType, time_series_from_array
 from t0.mask import MaskBuilder
 from t0.model.layers import PatchEncoder, Patcher, QuantileHead, ResidualBlock, Transformer
 from t0.model.rollout import RolloutManager
-from t0.quantile import interpolate_quantiles
+from t0.quantile import extrapolate_quantiles, get_rollout_quantile_levels, interpolate_quantiles
 from t0.scaler import CausalScaler
 
 if sys.version_info >= (3, 11):
@@ -92,6 +92,8 @@ class T0Forecaster(
         dropout: float,
         quantile_levels: Sequence[float],
         scaler_use_arcsinh: bool = True,
+        scaler_eps: float = 0.1,
+        scaler_eps_mode: ScalerEpsMode = "variance_offset",
         # Forwarded by huggingface_hub 1.x's from_pretrained (renamed from
         # torch_dtype). bf16/fp16 keep fp32 weights and autocast the forward
         # in predict(); other dtypes run in fp32 with no autocast.
@@ -110,6 +112,8 @@ class T0Forecaster(
             dropout=dropout,
             quantile_levels=tuple(quantile_levels),
             scaler_use_arcsinh=scaler_use_arcsinh,
+            scaler_eps=scaler_eps,
+            scaler_eps_mode=scaler_eps_mode,
         )
 
         self.patch_size = patch_size
@@ -122,7 +126,9 @@ class T0Forecaster(
         # standardized by its own running statistics — matching how the
         # published checkpoint was trained. Forecasts are rescaled with the
         # stats at each patch's last time step (see rescale_predictions).
-        self.scaler = CausalScaler(patch_size=1, use_arcsinh=scaler_use_arcsinh)
+        self.scaler = CausalScaler(
+            patch_size=1, use_arcsinh=scaler_use_arcsinh, eps=scaler_eps, eps_mode=scaler_eps_mode
+        )
 
         self.patch_encoder = PatchEncoder(
             embed_dim=embed_dim,
@@ -172,23 +178,25 @@ class T0Forecaster(
         return self.head(decoded)
 
     @staticmethod
-    def _validate_prediction_args(horizon: int, quantiles: Sequence[float]) -> None:
+    def _validate_prediction_args(horizon: int, quantile_levels: Sequence[float]) -> None:
         if horizon < 1:
             raise ValueError(f"horizon must be >= 1, got {horizon}")
-        if not quantiles:
-            raise ValueError("quantiles must be non-empty")
-        for q in quantiles:
+        if not quantile_levels:
+            raise ValueError("quantile_levels must be non-empty")
+        for q in quantile_levels:
             if not (0.0 < q < 1.0):
                 raise ValueError(f"each quantile must be in (0, 1); got {q}")
-        if list(quantiles) != sorted(set(quantiles)):
-            raise ValueError(f"quantiles must be sorted ascending without duplicates; got {list(quantiles)}")
+        if list(quantile_levels) != sorted(set(quantile_levels)):
+            raise ValueError(
+                f"quantile_levels must be sorted ascending without duplicates; got {list(quantile_levels)}"
+            )
 
     @overload
     def predict(
         self,
         model_input: TimeSeries,
         horizon: int,
-        quantiles: Sequence[float] = ...,
+        quantile_levels: Sequence[float] = ...,
         *,
         context_length: int | None = ...,
     ) -> Forecast: ...
@@ -201,7 +209,7 @@ class T0Forecaster(
         | Float[np.ndarray, "batch time"]
         | Float[np.ndarray, "batch variates time"],
         horizon: int,
-        quantiles: Sequence[float] = ...,
+        quantile_levels: Sequence[float] = ...,
         *,
         future_covariates: Float[Tensor, "batch future_variates context_plus_horizon"]
         | Float[np.ndarray, "batch future_variates context_plus_horizon"]
@@ -215,7 +223,7 @@ class T0Forecaster(
         self,
         model_input,
         horizon: int,
-        quantiles: Sequence[float] = (0.1, 0.5, 0.9),
+        quantile_levels: Sequence[float] = (0.1, 0.5, 0.9),
         *,
         context_length: int | None = None,
         future_covariates=None,
@@ -230,8 +238,9 @@ class T0Forecaster(
                 forecast). An array is converted with ``TimeSeries.from_array``. NaN marks a
                 missing observation unless ``mask`` says otherwise.
             horizon: Number of future timesteps to forecast.
-            quantiles: Quantile levels to return, sorted ascending in ``(0, 1)``; levels the
-                model wasn't trained on are interpolated.
+            quantile_levels: Quantile levels to return, sorted ascending in ``(0, 1)``; levels
+                between trained ones are interpolated, levels beyond them extrapolated on
+                exponential tails.
             context_length: Width of the right-aligned historical context. Defaults to the
                 start of the forecast region.
             future_covariates: Array inputs only. ``[B, F, T + horizon]`` covariates known over
@@ -251,11 +260,11 @@ class T0Forecaster(
             Always float32, finite, on the model's device.
 
         Raises:
-            ValueError: ``horizon`` or ``quantiles`` are out of range, ``context_length`` does
+            ValueError: ``horizon`` or ``quantile_levels`` are out of range, ``context_length`` does
                 not fit the input width, the input has no target row, or an array-only
                 argument is passed alongside a ``TimeSeries``.
         """
-        self._validate_prediction_args(horizon, quantiles)
+        self._validate_prediction_args(horizon, quantile_levels)
         device = next(self.parameters()).device
         batch_shape = None
 
@@ -294,17 +303,19 @@ class T0Forecaster(
             if self._amp_dtype is not None
             else contextlib.nullcontext()
         )
+        rollout_levels = get_rollout_quantile_levels(self.config.quantile_levels, quantile_levels)
         with amp_ctx:
             predictions = RolloutManager(self).predict(
                 model_input,
                 prediction_length=horizon,
-                query_quantile_levels=torch.tensor(list(quantiles), dtype=torch.float32, device=device),
+                query_quantile_levels=torch.tensor(rollout_levels, dtype=torch.float32, device=device),
                 context_length=context_length,
             )
         predictions = _sanitize_predictions(predictions)
+        predictions = extrapolate_quantiles(quantile_levels, rollout_levels, predictions, self.config.quantile_levels)
         if batch_shape is not None:
             predictions = predictions.unflatten(0, batch_shape)
-        return Forecast(quantiles=predictions, quantile_levels=tuple(quantiles))
+        return Forecast(quantiles=predictions, quantile_levels=tuple(quantile_levels))
 
 
 def _sanitize_predictions(predictions: Float[Tensor, "*batch quantiles"]) -> Float[Tensor, "*batch quantiles"]:

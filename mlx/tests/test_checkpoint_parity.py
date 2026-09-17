@@ -168,18 +168,22 @@ def test_single_pass_forecast_matches_pytorch_checkpoint() -> None:
     quantiles = [0.1, 0.2, 0.5, 0.8, 0.9]
 
     with torch.inference_mode():
-        expected = reference.predict(context, horizon=64, quantiles=quantiles).quantiles.numpy()
-    actual = np.asarray(candidate.predict(context, horizon=64, quantiles=quantiles).quantiles)
+        expected = reference.predict(context, horizon=64, quantile_levels=quantiles).quantiles.numpy()
+    actual = np.asarray(candidate.predict(context, horizon=64, quantile_levels=quantiles).quantiles)
     np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=2e-4)
 
-    compiled = np.asarray(candidate.compile().predict(context, horizon=64, quantiles=quantiles).quantiles)
+    compiled = np.asarray(candidate.compile().predict(context, horizon=64, quantile_levels=quantiles).quantiles)
     np.testing.assert_allclose(compiled, expected, rtol=1e-5, atol=2e-4)
 
     candidate.uncompile()
     multivariate = context[:2].reshape(1, 2, -1)
     with torch.inference_mode():
-        expected_multivariate = reference.predict(multivariate, horizon=32, quantiles=[0.1, 0.5, 0.9]).quantiles.numpy()
-    actual_multivariate = np.asarray(candidate.predict(multivariate, horizon=32, quantiles=[0.1, 0.5, 0.9]).quantiles)
+        expected_multivariate = reference.predict(
+            multivariate, horizon=32, quantile_levels=[0.1, 0.5, 0.9]
+        ).quantiles.numpy()
+    actual_multivariate = np.asarray(
+        candidate.predict(multivariate, horizon=32, quantile_levels=[0.1, 0.5, 0.9]).quantiles
+    )
     np.testing.assert_allclose(actual_multivariate, expected_multivariate, rtol=1e-5, atol=2e-4)
 
     grouped = context
@@ -188,11 +192,11 @@ def test_single_pass_forecast_matches_pytorch_checkpoint() -> None:
         expected_grouped = reference.predict(
             grouped,
             horizon=32,
-            quantiles=[0.1, 0.5, 0.9],
+            quantile_levels=[0.1, 0.5, 0.9],
             group_ids=group_ids,
         ).quantiles.numpy()
     actual_grouped = np.asarray(
-        candidate.predict(grouped, horizon=32, quantiles=[0.1, 0.5, 0.9], group_ids=group_ids).quantiles
+        candidate.predict(grouped, horizon=32, quantile_levels=[0.1, 0.5, 0.9], group_ids=group_ids).quantiles
     )
     np.testing.assert_allclose(actual_grouped, expected_grouped, rtol=1e-5, atol=2e-4)
 
@@ -203,7 +207,7 @@ def test_single_pass_forecast_matches_pytorch_checkpoint() -> None:
         expected_ragged = reference.predict(
             torch_context,
             horizon=32,
-            quantiles=[0.1, 0.5, 0.9],
+            quantile_levels=[0.1, 0.5, 0.9],
             mask=torch_mask,
             group_ids=torch_groups,
         ).quantiles.numpy()
@@ -211,14 +215,14 @@ def test_single_pass_forecast_matches_pytorch_checkpoint() -> None:
         candidate.predict(
             mlx_context,
             horizon=32,
-            quantiles=[0.1, 0.5, 0.9],
+            quantile_levels=[0.1, 0.5, 0.9],
             mask=mlx_mask,
             group_ids=mlx_groups,
         ).quantiles
     )
     np.testing.assert_allclose(actual_ragged, expected_ragged, rtol=2e-5, atol=3e-4)
     actual_short_alone = np.asarray(
-        candidate.predict(ragged_series[0], horizon=32, quantiles=[0.1, 0.5, 0.9]).quantiles
+        candidate.predict(ragged_series[0], horizon=32, quantile_levels=[0.1, 0.5, 0.9]).quantiles
     )[0]
     np.testing.assert_allclose(actual_ragged[0], actual_short_alone, rtol=2e-5, atol=3e-4)
 
@@ -229,11 +233,11 @@ def test_single_pass_forecast_matches_pytorch_checkpoint() -> None:
         expected_future = reference.predict(
             context,
             horizon=32,
-            quantiles=[0.1, 0.5, 0.9],
+            quantile_levels=[0.1, 0.5, 0.9],
             future_covariates=future,
         ).quantiles.numpy()
     actual_future = np.asarray(
-        candidate.predict(context, horizon=32, quantiles=[0.1, 0.5, 0.9], future_covariates=future).quantiles
+        candidate.predict(context, horizon=32, quantile_levels=[0.1, 0.5, 0.9], future_covariates=future).quantiles
     )
     np.testing.assert_allclose(actual_future, expected_future, rtol=1e-5, atol=2e-4)
 
@@ -244,9 +248,11 @@ def test_single_pass_forecast_matches_pytorch_checkpoint() -> None:
         expected_rollout = reference.predict(
             rollout_context,
             horizon=96,
-            quantiles=[0.1, 0.5, 0.9],
+            quantile_levels=[0.1, 0.5, 0.9],
         ).quantiles.numpy()
-    actual_rollout = np.asarray(candidate.predict(rollout_context, horizon=96, quantiles=[0.1, 0.5, 0.9]).quantiles)
+    actual_rollout = np.asarray(
+        candidate.predict(rollout_context, horizon=96, quantile_levels=[0.1, 0.5, 0.9]).quantiles
+    )
     np.testing.assert_allclose(actual_rollout, expected_rollout, rtol=2e-5, atol=3e-4)
 
     rollout_future = rng.normal(size=(1, 1, rollout_context.shape[-1] + 96)).astype(np.float32)
@@ -254,14 +260,14 @@ def test_single_pass_forecast_matches_pytorch_checkpoint() -> None:
         expected_future_rollout = reference.predict(
             rollout_context,
             horizon=96,
-            quantiles=[0.1, 0.5, 0.9],
+            quantile_levels=[0.1, 0.5, 0.9],
             future_covariates=rollout_future,
         ).quantiles.numpy()
     actual_future_rollout = np.asarray(
         candidate.predict(
             rollout_context,
             horizon=96,
-            quantiles=[0.1, 0.5, 0.9],
+            quantile_levels=[0.1, 0.5, 0.9],
             future_covariates=rollout_future,
         ).quantiles
     )

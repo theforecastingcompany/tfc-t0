@@ -8,6 +8,7 @@
 
 """Quantile interpolation and autoregressive rollout reduction."""
 
+import math
 from bisect import bisect_right
 from collections.abc import Sequence
 
@@ -40,6 +41,101 @@ def interpolate_quantiles(query_levels: Sequence[float], source_levels: Sequence
             lower = upper - 1
             weight = (query - source[lower]) / (source[upper] - source[lower])
             columns.append(values[..., lower] + weight * (values[..., upper] - values[..., lower]))
+    return mx.stack(columns, axis=-1)
+
+
+def get_rollout_quantile_levels(
+    trained_quantile_levels: Sequence[float], requested_quantile_levels: Sequence[float]
+) -> tuple[float, ...]:
+    """Return the quantile levels a rollout must produce in order to serve a request.
+
+    A requested level inside the trained range is returned as asked for. A level beyond
+    it is left out and replaced by the trained levels its tail pins through: the
+    boundary knot at that end and its inward neighbour. Interpolation would clamp such a
+    level flat onto its boundary knot, so carrying it through the rollout would cost a
+    path to reproduce a column the boundary knot already holds, and would reweight every
+    other level through the reduction's probability mass.
+    """
+    knots = select_tail_knots(trained_quantile_levels, requested_quantile_levels)
+    if knots is None:
+        return tuple(requested_quantile_levels)
+    interior = [level for level in requested_quantile_levels if knots[0] <= level <= knots[-1]]
+    return tuple(sorted(set(interior).union(knots)))
+
+
+def extrapolate_quantiles(
+    query_quantile_levels: Sequence[float],
+    original_quantile_levels: Sequence[float],
+    original_values: mx.array,
+    trained_quantile_levels: Sequence[float],
+) -> mx.array:
+    """Return quantiles at the query levels, extrapolating those beyond the trained range.
+
+    ``original_values`` holds the quantiles at ``original_quantile_levels``, as returned
+    by a rollout over ``get_rollout_quantile_levels``. Query levels inside the trained
+    range are taken from it unchanged; levels outside it are evaluated on exponential
+    tails pinned through the outermost trained levels.
+    """
+    knots = select_tail_knots(trained_quantile_levels, query_quantile_levels)
+    if knots is None:
+        return original_values
+    left = [level for level in query_quantile_levels if level < knots[0]]
+    right = [level for level in query_quantile_levels if level > knots[-1]]
+    knot_columns = mx.take(original_values, mx.array([original_quantile_levels.index(knot) for knot in knots]), axis=-1)
+    tail_values = extend_quantile_tails(left + right, knots, knot_columns)
+    # The tails bracket the original levels, so the full grid is a plain concatenation.
+    full = mx.concatenate([tail_values[..., : len(left)], original_values, tail_values[..., len(left) :]], axis=-1)
+    full_levels = left + list(original_quantile_levels) + right
+    return mx.take(full, mx.array([full_levels.index(level) for level in query_quantile_levels]), axis=-1)
+
+
+def select_tail_knots(
+    trained_quantile_levels: Sequence[float], requested_quantile_levels: Sequence[float]
+) -> tuple[float, ...] | None:
+    """Return the trained levels the exponential tails pin through, or None when no tail is needed.
+
+    A tail pins through the boundary knot at its end and that knot's inward neighbour,
+    so four trained levels at most are returned, or three when the range has an odd
+    middle level shared by both ends.
+
+    Trained levels are rounded to 6 decimals so float32 storage error
+    (0.1 -> 0.10000000149...) cannot misclassify a requested level equal to a trained
+    one as a tail.
+    """
+    ordered = sorted(round(float(level), 6) for level in trained_quantile_levels)
+    if not any(level < ordered[0] or level > ordered[-1] for level in requested_quantile_levels):
+        return None
+    if len(ordered) < 2:
+        raise ValueError("need at least two trained quantile levels to pin a tail")
+    return tuple(sorted({ordered[0], ordered[1], ordered[-2], ordered[-1]}))
+
+
+def extend_quantile_tails(
+    tail_levels: Sequence[float], knot_levels: Sequence[float], knot_values: mx.array
+) -> mx.array:
+    """Evaluate IQF exponential tails (Park et al., arXiv 2111.06581) at levels outside the knot range.
+
+    For knots k_0 < ... < k_N carrying values v_i = v(k_i), a level q below k_0 lies on
+    the left tail, linear in log(q), and a level q above k_N on the right tail, linear
+    in log(1 - q)::
+
+        v(q) = v_0 + s_L * log(q / k_0)              s_L = (v_1 - v_0) / log(k_1 / k_0)
+        v(q) = v_N + s_R * log((1 - k_N) / (1 - q))  s_R = (v_N - v_N-1) / log((1 - k_N-1) / (1 - k_N))
+
+    Negative slopes (crossed knots) clamp to zero, degenerating to a flat tail, so both
+    tails are continuous at the boundary knots and monotone by construction.
+    """
+    knots = [float(level) for level in knot_levels]
+    left_slope = mx.maximum((knot_values[..., 1] - knot_values[..., 0]) / math.log(knots[1] / knots[0]), 0.0)
+    right_slope = mx.maximum(
+        (knot_values[..., -1] - knot_values[..., -2]) / math.log((1.0 - knots[-2]) / (1.0 - knots[-1])), 0.0
+    )
+    columns: list[mx.array] = []
+    for level in tail_levels:
+        if level < knots[0]:
+            columns.append(knot_values[..., 0] + left_slope * math.log(level / knots[0]))
+        else:
+            columns.append(knot_values[..., -1] + right_slope * math.log((1.0 - knots[-1]) / (1.0 - level)))
     return mx.stack(columns, axis=-1)
 
 

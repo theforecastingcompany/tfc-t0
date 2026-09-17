@@ -22,10 +22,16 @@ import mlx.nn as nn
 import numpy as np
 from huggingface_hub import snapshot_download
 
-from t0_mlx.config import T0Config
+from t0_mlx.config import ScalerEpsMode, T0Config
 from t0_mlx.data import MaskType, TimeSeries, VariateType
 from t0_mlx.layers import PatchEncoder, Patcher, QuantileHead, ResidualBlock, Transformer
-from t0_mlx.quantile import interpolate_quantiles, reduce_rollout_quantiles, validate_quantiles
+from t0_mlx.quantile import (
+    extrapolate_quantiles,
+    get_rollout_quantile_levels,
+    interpolate_quantiles,
+    reduce_rollout_quantiles,
+    validate_quantiles,
+)
 from t0_mlx.scaler import CausalScaler
 
 logger = logging.getLogger(__name__)
@@ -87,6 +93,8 @@ class T0Forecaster(nn.Module):
         dropout: float,
         quantile_levels: Sequence[float],
         scaler_use_arcsinh: bool = True,
+        scaler_eps: float = 0.1,
+        scaler_eps_mode: ScalerEpsMode = "variance_offset",
         **_: Any,
     ):
         super().__init__()
@@ -100,6 +108,8 @@ class T0Forecaster(nn.Module):
             dropout=dropout,
             quantile_levels=tuple(quantile_levels),
             scaler_use_arcsinh=scaler_use_arcsinh,
+            scaler_eps=scaler_eps,
+            scaler_eps_mode=scaler_eps_mode,
         )
         self.patch_size = patch_size
         self.max_horizon = DEFAULT_MAX_HORIZON
@@ -109,7 +119,7 @@ class T0Forecaster(nn.Module):
         # patch_size=1: the published checkpoint was trained with per-time-step
         # running statistics. rescale_predictions selects the statistic at each
         # model patch's right edge.
-        self.scaler = CausalScaler(use_arcsinh=scaler_use_arcsinh)
+        self.scaler = CausalScaler(use_arcsinh=scaler_use_arcsinh, eps=scaler_eps, eps_mode=scaler_eps_mode)
         self.patch_encoder = PatchEncoder(embed_dim, patch_size)
         self.transformer = Transformer(
             num_layers,
@@ -207,7 +217,7 @@ class T0Forecaster(nn.Module):
         self,
         context: mx.array | np.ndarray | list[Any] | tuple[Any, ...],
         horizon: int,
-        quantiles: Sequence[float] = (0.1, 0.5, 0.9),
+        quantile_levels: Sequence[float] = (0.1, 0.5, 0.9),
         future_covariates: mx.array | np.ndarray | None = None,
         mask: mx.array | np.ndarray | None = None,
         group_ids: mx.array | np.ndarray | None = None,
@@ -220,8 +230,9 @@ class T0Forecaster(nn.Module):
                 forecast). NaN marks a missing observation unless ``mask`` says
                 otherwise.
             horizon: Number of future timesteps to forecast.
-            quantiles: Quantile levels to return, sorted ascending in
-                ``(0, 1)``; levels the model was not trained on are interpolated.
+            quantile_levels: Quantile levels to return, sorted ascending in ``(0, 1)``;
+                levels between trained ones are interpolated, levels beyond them
+                extrapolated on exponential tails.
             future_covariates: Optional ``[B, F, T + horizon]`` covariates known
                 over the context and horizon (for example calendar features);
                 conditioned on but not forecast. NaN over the horizon is 0.
@@ -249,7 +260,8 @@ class T0Forecaster(nn.Module):
             raise ValueError(
                 f"max_horizon must be a positive multiple of patch_size ({self.patch_size}), got {self.max_horizon}"
             )
-        requested_quantiles = validate_quantiles(quantiles)
+        requested_quantiles = validate_quantiles(quantile_levels)
+        rollout_quantiles = get_rollout_quantile_levels(self.config.quantile_levels, requested_quantiles)
 
         context_array = mx.array(context, dtype=mx.float32)
         mask_array = None if mask is None else mx.array(mask)
@@ -272,10 +284,10 @@ class T0Forecaster(nn.Module):
         step_horizon = min(forecast_width, self.max_horizon)
         window = buffer.time_slice(0, context_width + step_horizon)
         native = self._predict_step(window, step_horizon)[:target_count]
-        prediction = interpolate_quantiles(requested_quantiles, self.config.quantile_levels, native)
+        prediction = interpolate_quantiles(rollout_quantiles, self.config.quantile_levels, native)
 
         if horizon > step_horizon:
-            paths = self._expand_prediction_paths(buffer, len(requested_quantiles))
+            paths = self._expand_prediction_paths(buffer, len(rollout_quantiles))
             predictions = [prediction]
             decoded = step_horizon
             remaining = horizon - step_horizon
@@ -288,17 +300,17 @@ class T0Forecaster(nn.Module):
                 )
                 step_horizon = min(_round_up(remaining, self.patch_size), self.max_horizon)
                 window = paths.time_slice(decoded, context_width + decoded + step_horizon)
-                native = self._predict_step(window, step_horizon)[: target_count * len(requested_quantiles)]
+                native = self._predict_step(window, step_horizon)[: target_count * len(rollout_quantiles)]
                 native = native.reshape(
                     target_count,
-                    len(requested_quantiles),
+                    len(rollout_quantiles),
                     step_horizon,
                     self.head.n_quantiles,
                 ).transpose(0, 1, 3, 2)
                 prediction = reduce_rollout_quantiles(
                     native,
                     self.config.quantile_levels,
-                    requested_quantiles,
+                    rollout_quantiles,
                 )
                 predictions.append(prediction)
                 decoded += step_horizon
@@ -306,6 +318,9 @@ class T0Forecaster(nn.Module):
             prediction = mx.concatenate(predictions, axis=1)
 
         predictions = _sanitize_predictions(prediction[:, :horizon])
+        predictions = extrapolate_quantiles(
+            requested_quantiles, rollout_quantiles, predictions, self.config.quantile_levels
+        )
         if context_array.ndim == 3:
             predictions = predictions.reshape(
                 context_array.shape[0],

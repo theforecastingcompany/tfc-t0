@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 
+from t0_mlx.config import ScalerEpsMode
 from t0_mlx.data import TimeSeries, VariateType
 
 EPS = 1e-1
@@ -23,7 +24,9 @@ class LocScale:
     scale: mx.array
 
 
-def _compute_causal_stats(x: mx.array, invalid: mx.array) -> tuple[mx.array, mx.array]:
+def _compute_causal_stats(
+    x: mx.array, invalid: mx.array, eps: float = EPS, eps_mode: ScalerEpsMode = "variance_offset"
+) -> tuple[mx.array, mx.array]:
     """Match the reference cumulative Welford calculation for one series per row."""
     valid = ~invalid
     counts = mx.cumsum(valid.astype(x.dtype), axis=-1)
@@ -36,10 +39,12 @@ def _compute_causal_stats(x: mx.array, invalid: mx.array) -> tuple[mx.array, mx.
     increments = delta * (masked_x - means) * valid.astype(x.dtype)
     m2 = mx.maximum(mx.cumsum(increments, axis=-1), mx.array(0.0, dtype=x.dtype))
     variance = m2 / mx.maximum(safe_counts - 1.0, mx.array(1.0, dtype=x.dtype))
-    return means, mx.sqrt(variance + EPS)
+    if eps_mode == "variance_offset":
+        return means, mx.sqrt(variance + eps)
+    return means, mx.maximum(mx.sqrt(variance), mx.array(eps, dtype=x.dtype))
 
 
-def _compute_global_stats(x: mx.array, invalid: mx.array) -> tuple[mx.array, mx.array]:
+def _compute_global_stats(x: mx.array, invalid: mx.array, eps: float = EPS) -> tuple[mx.array, mx.array]:
     """Compute global population statistics independently for each row."""
     valid = ~invalid
     counts = mx.sum(valid.astype(x.dtype), axis=-1, keepdims=True)
@@ -51,7 +56,7 @@ def _compute_global_stats(x: mx.array, invalid: mx.array) -> tuple[mx.array, mx.
         counts,
         mx.array(2.0, dtype=x.dtype),
     )
-    scales = mx.maximum(mx.sqrt(variance), mx.array(EPS, dtype=x.dtype))
+    scales = mx.maximum(mx.sqrt(variance), mx.array(eps, dtype=x.dtype))
     return mx.broadcast_to(means, x.shape), mx.broadcast_to(scales, x.shape)
 
 
@@ -63,13 +68,15 @@ class CausalScaler:
     inverse-scaled with the statistic at each model patch's right edge.
     """
 
-    def __init__(self, use_arcsinh: bool = True):
+    def __init__(self, use_arcsinh: bool = True, eps: float = EPS, eps_mode: ScalerEpsMode = "variance_offset"):
         self.use_arcsinh = use_arcsinh
+        self.eps = eps
+        self.eps_mode = eps_mode
 
     def scale_input(self, model_input: TimeSeries) -> tuple[TimeSeries, LocScale]:
         invalid = ~model_input.valid_mask
-        causal_loc, causal_scale = _compute_causal_stats(model_input.variates, invalid)
-        future_loc, future_scale = _compute_global_stats(model_input.variates, invalid)
+        causal_loc, causal_scale = _compute_causal_stats(model_input.variates, invalid, self.eps, self.eps_mode)
+        future_loc, future_scale = _compute_global_stats(model_input.variates, invalid, self.eps)
         non_padding = model_input.group_ids >= 0
         is_future = non_padding & (model_input.variate_type == VariateType.FUTURE)
         is_causal = non_padding & ~is_future

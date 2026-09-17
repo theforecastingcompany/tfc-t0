@@ -32,8 +32,8 @@ class T0Predictor:
         model: A loaded ``T0Forecaster`` (already on its target device).
         prediction_length: Forecast horizon in timesteps.
         quantile_levels: Quantile levels to forecast. Defaults to the
-            model's trained levels; other levels are interpolated by
-            ``T0Forecaster.predict``.
+            levels use for training the model. Other levels are interpolated or, beyond the
+            trained range, extrapolated.
         context_length: If set, keep only the most recent ``context_length``
             observations of each series.
         batch_size: Entries per forward pass.
@@ -120,7 +120,7 @@ class T0Predictor:
             out = self.model.predict(
                 np.stack([contexts[i] for i in indices]),
                 horizon=self.prediction_length,
-                quantiles=self.quantile_levels,
+                quantile_levels=self.quantile_levels,
             )
             quantiles[indices] = out.quantiles.cpu().numpy()
 
