@@ -36,7 +36,7 @@ open-weight models.
 | --- | --- |
 | Local inference on Apple silicon with MLX | `pip install tfc-t0-mlx` |
 | Local inference with PyTorch | [`pip install tfc-t0`](https://pypi.org/project/tfc-t0/) |
-| Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com/documentation/t0-alpha) |
+| Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com) |
 
 Both local runtimes load the same model repository and offer a closely matched
 `T0Forecaster.predict()` API. MLX compilation is available as an opt-in
