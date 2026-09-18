@@ -36,7 +36,7 @@ backend. ONNX artifacts and our managed API cover other deployment targets:
 | Local inference on Apple silicon with MLX | `pip install "tfc-t0-mlx>=0.1.0"` |
 | Accelerator-oriented local and edge inference with ONNX FP16 | [`t0-alpha-onnx-fp16`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) |
 | CPU and in-browser inference with ONNX INT8 | [`t0-alpha-onnx-int8`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) |
-| Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com/documentation/t0-alpha) |
+| Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com) |
 
 The ONNX artifacts are built from `t0-alpha`; there is no `t0-beta` ONNX
 export yet.
