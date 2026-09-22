@@ -94,6 +94,7 @@ class T0Forecaster(
         scaler_use_arcsinh: bool = True,
         scaler_eps: float = 0.1,
         scaler_eps_mode: ScalerEpsMode = "variance_offset",
+        scaler_include_censored_in_stats: bool = True,
         # Forwarded by huggingface_hub 1.x's from_pretrained (renamed from
         # torch_dtype). bf16/fp16 keep fp32 weights and autocast the forward
         # in predict(); other dtypes run in fp32 with no autocast.
@@ -114,6 +115,7 @@ class T0Forecaster(
             scaler_use_arcsinh=scaler_use_arcsinh,
             scaler_eps=scaler_eps,
             scaler_eps_mode=scaler_eps_mode,
+            scaler_include_censored_in_stats=scaler_include_censored_in_stats,
         )
 
         self.patch_size = patch_size
@@ -127,7 +129,11 @@ class T0Forecaster(
         # published checkpoint was trained. Forecasts are rescaled with the
         # stats at each patch's last time step (see rescale_predictions).
         self.scaler = CausalScaler(
-            patch_size=1, use_arcsinh=scaler_use_arcsinh, eps=scaler_eps, eps_mode=scaler_eps_mode
+            patch_size=1,
+            use_arcsinh=scaler_use_arcsinh,
+            eps=scaler_eps,
+            eps_mode=scaler_eps_mode,
+            include_censored_in_stats=scaler_include_censored_in_stats,
         )
 
         self.patch_encoder = PatchEncoder(

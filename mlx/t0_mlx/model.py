@@ -95,6 +95,7 @@ class T0Forecaster(nn.Module):
         scaler_use_arcsinh: bool = True,
         scaler_eps: float = 0.1,
         scaler_eps_mode: ScalerEpsMode = "variance_offset",
+        scaler_include_censored_in_stats: bool = True,
         **_: Any,
     ):
         super().__init__()
@@ -110,6 +111,7 @@ class T0Forecaster(nn.Module):
             scaler_use_arcsinh=scaler_use_arcsinh,
             scaler_eps=scaler_eps,
             scaler_eps_mode=scaler_eps_mode,
+            scaler_include_censored_in_stats=scaler_include_censored_in_stats,
         )
         self.patch_size = patch_size
         self.max_horizon = DEFAULT_MAX_HORIZON
@@ -119,7 +121,12 @@ class T0Forecaster(nn.Module):
         # patch_size=1: the published checkpoint was trained with per-time-step
         # running statistics. rescale_predictions selects the statistic at each
         # model patch's right edge.
-        self.scaler = CausalScaler(use_arcsinh=scaler_use_arcsinh, eps=scaler_eps, eps_mode=scaler_eps_mode)
+        self.scaler = CausalScaler(
+            use_arcsinh=scaler_use_arcsinh,
+            eps=scaler_eps,
+            eps_mode=scaler_eps_mode,
+            include_censored_in_stats=scaler_include_censored_in_stats,
+        )
         self.patch_encoder = PatchEncoder(embed_dim, patch_size)
         self.transformer = Transformer(
             num_layers,

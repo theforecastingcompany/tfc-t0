@@ -65,6 +65,20 @@ class TimeSeries:
     def valid_mask(self) -> Bool[Tensor, "variates time"]:
         return self.mask == MaskType.VALID
 
+    def stats_mask(self, include_censored: bool) -> Bool[Tensor, "variates time"]:
+        """Cells that count toward the scaler's location and scale.
+
+        A ``VALID`` cell always counts. A ``CENSORED`` cell counts only when
+        ``include_censored`` is set — the serving mirror of the training
+        scaler's ``include_censored_in_stats`` rule, so a censor-aware
+        checkpoint is normalized the way it was trained. ``PAD``, ``MISSING``
+        and ``WITHHELD`` cells never count.
+        """
+        counts = self.valid_mask
+        if include_censored:
+            counts = counts | (self.mask == MaskType.CENSORED)
+        return counts
+
     @property
     def device(self) -> torch.device:
         return self.variates.device
@@ -131,8 +145,11 @@ class TimeSeries:
 
         ``mask`` holds ``MaskType`` values shaped like ``targets``: ``MISSING``
         for an absent observation, ``PAD`` for a cell that only pads a shorter
-        series out to the batch's width. Only all-``PAD`` patches leave attention.
-        Without it every NaN in ``targets`` is read as an absent observation.
+        series out to the batch's width, ``CENSORED`` for an observation capped
+        by a known limit (a stockout, say). Only all-``PAD`` patches leave
+        attention. A ``CENSORED`` cell keeps its value and, by default, counts
+        toward the scaler's statistics — see ``TimeSeries.stats_mask``. Without
+        a mask every NaN in ``targets`` is read as an absent observation.
 
         ``group_ids`` holds one id per row of the flattened ``targets``; rows
         sharing an id are variates of one series and attend to one another.

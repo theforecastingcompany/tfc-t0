@@ -56,6 +56,13 @@ class T0Config:
             agree wherever a series' local standard deviation sits well above
             ``eps`` and diverge below it. The global (known-future) statistic
             always clamps.
+        scaler_include_censored_in_stats: Whether a ``MaskType.CENSORED`` cell
+            counts toward the scaler's location and scale. This must match the
+            training scaler's ``include_censored_in_stats`` rule: a checkpoint
+            trained with censored cells in its statistics is only valid served
+            the same way. It has no effect on an input with no censored cell,
+            so the ``True`` default stays bit-identical on every checkpoint
+            that predates censoring.
     """
 
     embed_dim: int
@@ -67,10 +74,11 @@ class T0Config:
     dropout: float
     quantile_levels: tuple[float, ...]
     scaler_use_arcsinh: bool = True
-    # Defaults reproduce t0-alpha, whose published config.json predates both
+    # Defaults reproduce t0-alpha, whose published config.json predates these
     # fields — from_pretrained on it must stay bit-identical.
     scaler_eps: float = 0.1
     scaler_eps_mode: ScalerEpsMode = "variance_offset"
+    scaler_include_censored_in_stats: bool = True
 
     def __post_init__(self) -> None:
         if not self.quantile_levels:
@@ -98,6 +106,7 @@ class T0Config:
             scaler_use_arcsinh=True,
             scaler_eps=0.1,
             scaler_eps_mode="variance_offset",
+            scaler_include_censored_in_stats=True,
         )
 
     @classmethod
@@ -137,4 +146,5 @@ class T0Config:
             scaler_use_arcsinh=True,
             scaler_eps=0.01,
             scaler_eps_mode="std_clamp",
+            scaler_include_censored_in_stats=True,
         )
