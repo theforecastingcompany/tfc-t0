@@ -167,7 +167,9 @@ class Transformer(nn.Module):
         padding_mask = ~attendable if not attendable.all() else None
 
         time_attn_mask = self.mask_builder.build_time_mask(patch_group_ids, patch_variate_type, padding_mask)
-        group_attn_mask = self.mask_builder.expand_group_mask(self.mask_builder.build_group_mask(patch_group_ids))
+        group_attn_mask = self.mask_builder.expand_group_mask(
+            self.mask_builder.build_group_mask(patch_group_ids, patch_variate_type)
+        )
 
         for layer in self.layers:
             x = layer(x, time_attn_mask=time_attn_mask, group_attn_mask=group_attn_mask)

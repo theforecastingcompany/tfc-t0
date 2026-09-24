@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A [notebook](https://github.com/theforecastingcompany/tfc-t0/blob/main/notebooks/03_electricity_day_ahead_prices.ipynb)
+  showcasing `t0` on European electricity spot prices.
+- A link to the `t0` paper on [arXiv](https://arxiv.org/abs/2609.24559).
+
+### Fixed
+
+- Variate attention now matches training when known-future covariates are
+  present: a future-covariate row reads only future-covariate rows, so
+  information flows from covariates into targets and never back. The
+  released checkpoints were trained under this rule, but the runtime let
+  future covariates read the target and historical rows through an attention
+  edge that never received gradient. Forecasts without future covariates are
+  bit-identical; forecasts with them change, by a few percent of the series
+  scale with one to four covariates and more with many.
+  `MaskBuilder.build_group_mask` now takes `patch_variate_type`.
+- A patch now takes its variate type from its first non-padding time step,
+  as in training. When a context length is not a multiple of the patch size
+  the runtime left-pads the first patch, and that patch on a covariate row
+  was embedded as a target. Forecasts change only for covariate rows with
+  such a partial first patch: `t0-alpha` and `t0-beta` learned the old rule
+  and move slightly there; later checkpoints expect the new one.
+
 ## [0.5.0] - 2026-09-17
 
 Adds support for `t0-beta`, the 256M-parameter second public checkpoint.

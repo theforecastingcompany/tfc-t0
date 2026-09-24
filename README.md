@@ -8,6 +8,7 @@
 # `t0`
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2609.24559"><img src="https://img.shields.io/badge/arXiv-2609.24559-b31b1b.svg" alt="arXiv" /></a>
   <a href="https://pypi.org/project/tfc-t0/"><img src="https://img.shields.io/pypi/v/tfc-t0" alt="PyPI" /></a>
   <a href="https://pypi.org/project/tfc-t0/"><img src="https://img.shields.io/pypi/pyversions/tfc-t0" alt="Python versions" /></a>
   <a href="https://github.com/theforecastingcompany/tfc-t0/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/tfc-t0" alt="License" /></a>
@@ -62,6 +63,12 @@ available, to improve its forecast.
 _Data: [Medic'AM](https://www.assurance-maladie.ameli.fr/etudes-et-donnees/medicaments-classe-atc-medicam),
 monthly drug reimbursements from the French national health insurance._
 
+For a complete worked example, the
+[European day-ahead electricity prices notebook](https://github.com/theforecastingcompany/tfc-t0/blob/main/notebooks/03_electricity_day_ahead_prices.ipynb)
+forecasts hourly prices in four bidding zones with load, renewable, holiday
+and weather covariates, and backtests the result.
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/theforecastingcompany/tfc-t0/blob/main/notebooks/03_electricity_day_ahead_prices.ipynb)
+
 The [Quickstart](#-quickstart) below shows the API for both a plain
 univariate forecast and a multivariate forecast that conditions on
 historical and known-future covariates.
@@ -97,11 +104,7 @@ single-row batch. NaN in the context is read as a missing observation. To
 say that some cells are padding instead, pass a `mask`. See
 [batched inference](#batched-inference).
 
-`t0-beta` downloads without authentication. `t0-alpha` is gated: sign in to
-[its model page](https://huggingface.co/theforecastingcompany/t0-alpha),
-accept the access conditions, then run `hf auth login` (or, in a notebook,
-`from huggingface_hub import login; login()`) and pass `token=True` to
-`from_pretrained`.
+`t0-alpha` and `t0-beta` are public and download without authentication.
 
 ### Forecasting with covariates
 
@@ -261,14 +264,15 @@ Apache-2.0.
 
 ## 📚 Citation
 
-If our model is useful, please use the following citation and star our repo!
+If our model is useful, please cite our [paper](https://arxiv.org/abs/2609.24559) and star our repo!
 
 ```bibtex
-@misc{tfc-t0,
-  title  = {t0: A time-series forecasting foundation model},
-  author = {The Forecasting Company},
-  year   = {2026},
-  url    = {https://huggingface.co/theforecastingcompany/t0-beta},
+@article{meyer2026t0,
+  title   = {$t_0$: A Time-Series Foundation Model for Forecasting with Context},
+  author  = {Meyer, Lucas and Sole, Claudio and Xiang, Huikan and Li, Nicolas and Franceschino, Lucas and Quera-Bofarull, Arnau and Scholl, Maarten P. and Fainberg, Joachim and N{\'e}giar, Geoffrey},
+  journal = {arXiv preprint arXiv:2609.24559},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2609.24559},
 }
 ```
 

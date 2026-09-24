@@ -24,6 +24,7 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 from t0.data import MaskType
+from t0.mask import reduce_patch_metadata
 from t0.model.layers.mlp import ResidualBlock
 
 
@@ -73,7 +74,7 @@ class PatchEncoder(nn.Module):
         t = self._time_index.unsqueeze(0).unsqueeze(0).expand(total_variates, n_patches, -1)
 
         embedded = self.projection(torch.cat([values, t, validity], dim=-1))
-        # First time step of each patch wins as the patch's type; -1 padding
-        # sentinels are clamped to 0 (padding patches are masked downstream).
-        type_embedding = self.type_embeddings(torch.clamp(variate_type[:, :, 0], min=0))
-        return embedded + type_embedding
+        # Left padding must not retype a covariate row as a target. Fully padded
+        # patches reduce to the -1 sentinel, clamped to 0 here; masked downstream.
+        patch_type = reduce_patch_metadata(variate_type, mask).clamp(min=0)
+        return embedded + self.type_embeddings(patch_type)

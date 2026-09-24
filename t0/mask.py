@@ -18,9 +18,11 @@ class MaskBuilder:
     Two masks per forward pass:
 
     - **per-patch group mask** ``(P, V, V)`` — at each patch, only variates
-      that share a ``group_ids`` value can attend. For inference inputs
-      (one independent series per row) every row has a unique group id and
-      the mask reduces to the identity.
+      that share a ``group_ids`` value can attend, and a future-covariate
+      query reads future-covariate keys only, so information flows from
+      covariates into targets and never back. For inference inputs (one
+      independent series per row) every row has a unique group id and the
+      mask reduces to the identity.
     - **per-variate time mask** ``(V, 1, P, P)`` — causal for target /
       historical variates, bidirectional for futures.
 
@@ -29,16 +31,26 @@ class MaskBuilder:
     """
 
     def build_group_mask(
-        self, patch_group_ids: Int[Tensor, "variates patches"]
+        self,
+        patch_group_ids: Int[Tensor, "variates patches"],
+        patch_variate_type: Int[Tensor, "variates patches"],
     ) -> Bool[Tensor, "patches variates variates"]:
-        """Per-patch ``(P, V, V)`` mask; ``-1`` marks padding patches."""
+        """Per-patch ``(P, V, V)`` mask; ``-1`` marks padding patches.
+
+        A future-covariate query may not read target or historical keys. The
+        diagonal stays valid (a future row reads itself), so every query keeps at
+        least one unmasked key.
+        """
         valid = patch_group_ids >= 0
 
         ids_t = patch_group_ids.T
         val_t = valid.T
         same_group = ids_t.unsqueeze(2) == ids_t.unsqueeze(1)
         both_valid = val_t.unsqueeze(2) & val_t.unsqueeze(1)
-        return same_group & both_valid
+
+        is_future = (patch_variate_type == VariateType.FUTURE).T
+        future_reads_non_future = is_future.unsqueeze(2) & ~is_future.unsqueeze(1)
+        return same_group & both_valid & ~future_reads_non_future
 
     def build_time_mask(
         self,

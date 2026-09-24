@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The README now links to the `t0` paper on arXiv
+  ([2609.24559](https://arxiv.org/abs/2609.24559)) with a badge, and its
+  citation block cites the paper.
+
+### Fixed
+
+- Variate attention now matches training when known-future covariates are
+  present: a future-covariate row reads only future-covariate rows, so
+  information flows from covariates into targets and never back. Forecasts
+  without future covariates are bit-identical; forecasts with them change.
+  Mirrors the same fix in `tfc-t0`.
+- A patch now takes its variate type from its first non-padding time step, so
+  a left-padded first patch on a covariate row is no longer embedded as a
+  target. Mirrors the same fix in `tfc-t0`.
+
 ### Changed
 
 - **Breaking.** `T0Forecaster.predict`'s `quantiles` argument is now

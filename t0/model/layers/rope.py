@@ -95,6 +95,6 @@ class TimeAwareRotaryEmbedding(RotaryEmbedding):
         power = (t - t.max(-1).values.unsqueeze(-1) // 2) / self.scale_base
 
         scale = self.scale ** rearrange(power, "... n -> ... n 1")
-        scale = torch.cat((scale, scale), dim=-1)
+        scale = scale.repeat_interleave(2, dim=-1)
 
         return scale

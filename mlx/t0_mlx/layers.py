@@ -79,7 +79,9 @@ class PatchEncoder(nn.Module):
         time_index = mx.arange(self.patch_size, dtype=values.dtype) / self.patch_size
         time_index = mx.broadcast_to(time_index, (total_variates, n_patches, self.patch_size))
         embedded = self.projection(mx.concatenate([values, time_index, validity], axis=-1))
-        type_ids = mx.maximum(variate_type[:, :, 0], mx.array(0, dtype=variate_type.dtype))
+        # Left padding must not retype a covariate row as a target. Fully padded
+        # patches reduce to the -1 sentinel, clamped to 0 here; masked downstream.
+        type_ids = mx.maximum(_reduce_patch_metadata(variate_type, mask), mx.array(0, dtype=variate_type.dtype))
         return embedded + self.type_embeddings(type_ids)
 
 
@@ -176,7 +178,7 @@ class TimeAwareRotaryEmbedding:
         center = mx.floor(mx.max(positions) / 2.0)
         power = (positions - center) / self.scale_base
         half_scale = scale_frequencies[None, :] ** power[:, None]
-        scale = mx.concatenate([half_scale, half_scale], axis=-1).astype(queries.dtype)
+        scale = mx.repeat(half_scale, 2, axis=-1).astype(queries.dtype)
 
         rotated_queries = (queries * cosine + _rotate_half(queries) * sine) * scale
         rotated_keys = (keys * cosine + _rotate_half(keys) * sine) / scale
@@ -307,6 +309,11 @@ def _build_attention_masks(
     group_mask = (
         (ids_by_patch[:, :, None] == ids_by_patch[:, None, :]) & valid_by_patch[:, :, None] & valid_by_patch[:, None, :]
     )
+    # A future-covariate query reads future-covariate keys only: covariates inform
+    # targets, never the other way round. The diagonal stays valid.
+    future_by_patch = future_query.transpose(1, 0)
+    future_reads_non_future = future_by_patch[:, :, None] & ~future_by_patch[:, None, :]
+    group_mask = group_mask & ~future_reads_non_future
     return time_mask[:, None, :, :], group_mask[:, None, :, :]
 
 

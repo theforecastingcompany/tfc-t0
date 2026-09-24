@@ -8,6 +8,7 @@
 # `t0` for MLX
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2609.24559"><img src="https://img.shields.io/badge/arXiv-2609.24559-b31b1b.svg" alt="arXiv" /></a>
   <a href="https://pypi.org/project/tfc-t0-mlx/"><img src="https://img.shields.io/pypi/v/tfc-t0-mlx" alt="PyPI" /></a>
   <a href="https://pypi.org/project/tfc-t0-mlx/"><img src="https://img.shields.io/pypi/pyversions/tfc-t0-mlx" alt="Python versions" /></a>
   <a href="https://github.com/theforecastingcompany/tfc-t0/blob/main/mlx/LICENSE"><img src="https://img.shields.io/pypi/l/tfc-t0-mlx" alt="License" /></a>
@@ -73,9 +74,7 @@ PyTorch-style device selection or `.to("mps")` step.
 pip install tfc-t0-mlx
 ```
 
-The model repository is gated. Accept its terms on
-[Hugging Face](https://huggingface.co/theforecastingcompany/t0-alpha) and run
-`hf auth login` before the first download.
+The model weights are public and download without authentication.
 
 The simplest path is a univariate forecast through `predict`:
 
@@ -254,14 +253,15 @@ rewriting the weights.
 
 ## 📚 Citation
 
-If our model is useful, please use the following citation and star our repo!
+If our model is useful, please cite our [paper](https://arxiv.org/abs/2609.24559) and star our repo!
 
 ```bibtex
-@misc{tfc-t0,
-  title  = {t0: A time-series forecasting foundation model},
-  author = {The Forecasting Company},
-  year   = {2026},
-  url    = {https://huggingface.co/theforecastingcompany/t0-alpha},
+@article{meyer2026t0,
+  title   = {$t_0$: A Time-Series Foundation Model for Forecasting with Context},
+  author  = {Meyer, Lucas and Sole, Claudio and Xiang, Huikan and Li, Nicolas and Franceschino, Lucas and Quera-Bofarull, Arnau and Scholl, Maarten P. and Fainberg, Joachim and N{\'e}giar, Geoffrey},
+  journal = {arXiv preprint arXiv:2609.24559},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2609.24559},
 }
 ```
 
