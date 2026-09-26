@@ -41,6 +41,11 @@ class T0Config:
     # Defaults reproduce t0-alpha.
     scaler_eps: float = 0.1
     scaler_eps_mode: ScalerEpsMode = "variance_offset"
+    # A CENSORED cell counts toward the scaler's location and scale, matching
+    # the training scaler's ``include_censored_in_stats`` rule. It has no effect
+    # on an input with no censored cell, so this default stays bit-identical on
+    # every checkpoint that predates censoring.
+    scaler_include_censored_in_stats: bool = True
 
     def __post_init__(self) -> None:
         positive = {
@@ -85,6 +90,7 @@ class T0Config:
             "scaler_use_arcsinh",
             "scaler_eps",
             "scaler_eps_mode",
+            "scaler_include_censored_in_stats",
         }
         filtered = {key: value for key, value in values.items() if key in fields}
         if "quantile_levels" in filtered:
@@ -121,6 +127,7 @@ class T0Config:
             scaler_use_arcsinh=True,
             scaler_eps=0.1,
             scaler_eps_mode="variance_offset",
+            scaler_include_censored_in_stats=True,
         )
 
     @classmethod
@@ -160,4 +167,5 @@ class T0Config:
             scaler_use_arcsinh=True,
             scaler_eps=0.01,
             scaler_eps_mode="std_clamp",
+            scaler_include_censored_in_stats=True,
         )

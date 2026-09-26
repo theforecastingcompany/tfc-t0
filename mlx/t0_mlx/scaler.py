@@ -68,13 +68,20 @@ class CausalScaler:
     inverse-scaled with the statistic at each model patch's right edge.
     """
 
-    def __init__(self, use_arcsinh: bool = True, eps: float = EPS, eps_mode: ScalerEpsMode = "variance_offset"):
+    def __init__(
+        self,
+        use_arcsinh: bool = True,
+        eps: float = EPS,
+        eps_mode: ScalerEpsMode = "variance_offset",
+        include_censored_in_stats: bool = True,
+    ):
         self.use_arcsinh = use_arcsinh
         self.eps = eps
         self.eps_mode = eps_mode
+        self.include_censored_in_stats = include_censored_in_stats
 
     def scale_input(self, model_input: TimeSeries) -> tuple[TimeSeries, LocScale]:
-        invalid = ~model_input.valid_mask
+        invalid = ~model_input.stats_mask(self.include_censored_in_stats)
         causal_loc, causal_scale = _compute_causal_stats(model_input.variates, invalid, self.eps, self.eps_mode)
         future_loc, future_scale = _compute_global_stats(model_input.variates, invalid, self.eps)
         non_padding = model_input.group_ids >= 0

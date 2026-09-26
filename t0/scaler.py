@@ -155,8 +155,9 @@ class CausalScaler(torch.nn.Module):
     per-row global stats. Optionally applies arcsinh after the standard
     ``(x - loc) / scale`` step (novel to t0-alpha, helps with extreme outliers).
 
-    ``eps`` and ``eps_mode`` must match what the checkpoint was trained with;
-    ``T0Forecaster`` takes both from its ``T0Config``.
+    ``eps``, ``eps_mode`` and ``include_censored_in_stats`` must match what the
+    checkpoint was trained with; ``T0Forecaster`` takes all three from its
+    ``T0Config``.
 
     Stateless: zero parameters, zero buffers, contributes nothing to
     ``state_dict``.
@@ -168,6 +169,7 @@ class CausalScaler(torch.nn.Module):
         use_arcsinh: bool = False,
         eps: float = EPS,
         eps_mode: ScalerEpsMode = "variance_offset",
+        include_censored_in_stats: bool = True,
     ):
         super().__init__()
         if patch_size < 1:
@@ -176,6 +178,7 @@ class CausalScaler(torch.nn.Module):
         self.use_arcsinh = use_arcsinh
         self.eps = eps
         self.eps_mode = eps_mode
+        self.include_censored_in_stats = include_censored_in_stats
 
     def scale_input(
         self,
@@ -184,7 +187,7 @@ class CausalScaler(torch.nn.Module):
         variates = grouped_input.variates
         group_ids = grouped_input.group_ids
         variate_type = grouped_input.variate_type
-        invalid = ~grouped_input.valid_mask
+        invalid = ~grouped_input.stats_mask(self.include_censored_in_stats)
         v, t = variates.shape
 
         non_padding = group_ids >= 0

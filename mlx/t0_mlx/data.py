@@ -43,6 +43,20 @@ class TimeSeries:
     def valid_mask(self) -> mx.array:
         return self.mask == MaskType.VALID
 
+    def stats_mask(self, include_censored: bool) -> mx.array:
+        """Cells that count toward the scaler's location and scale.
+
+        A ``VALID`` cell always counts. A ``CENSORED`` cell counts only when
+        ``include_censored`` is set — the serving mirror of the training
+        scaler's ``include_censored_in_stats`` rule, so a censor-aware
+        checkpoint is normalized the way it was trained. ``PAD``, ``MISSING``
+        and ``WITHHELD`` cells never count.
+        """
+        counts = self.valid_mask
+        if include_censored:
+            counts = counts | (self.mask == MaskType.CENSORED)
+        return counts
+
     def time_slice(self, start: int, stop: int) -> "TimeSeries":
         """Return a half-open slice along the time axis."""
         return TimeSeries(

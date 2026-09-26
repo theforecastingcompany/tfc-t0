@@ -99,6 +99,44 @@ def test_scaler_and_rollout_quantiles_match_pytorch() -> None:
     np.testing.assert_allclose(np.asarray(actual_quantiles), expected_quantiles.numpy(), rtol=1e-6, atol=2e-6)
 
 
+def test_censored_scaler_matches_pytorch() -> None:
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("t0")
+    from t0.data import TimeSeries as TorchTimeSeries
+    from t0.scaler import CausalScaler as TorchCausalScaler
+
+    values = np.array(
+        [[1.0, 2.0, 3.0, 8.0, 13.0], [3.0, -2.0, 4.0, 7.0, 11.0]],
+        dtype=np.float32,
+    )
+    # MaskType.CENSORED == 3; the two twins must scale these cells identically.
+    mask = np.array([[0, 0, 3, 0, 0], [0, 3, 0, 0, 3]], dtype=np.int8)
+    torch_input = TorchTimeSeries.from_array(torch.from_numpy(values), mask=torch.from_numpy(mask))
+    mlx_input = MLXTimeSeries.from_context(mx.array(values), mask=mx.array(mask))
+
+    with torch.inference_mode():
+        expected_scaled, expected_stats = TorchCausalScaler(patch_size=1, use_arcsinh=True).scale_input(torch_input)
+    actual_scaled, actual_stats = MLXCausalScaler(use_arcsinh=True).scale_input(mlx_input)
+    mx.eval(actual_scaled.variates, actual_stats.loc, actual_stats.scale)
+
+    np.testing.assert_allclose(np.asarray(actual_scaled.variates), expected_scaled.variates.numpy(), atol=2e-6)
+    np.testing.assert_allclose(np.asarray(actual_stats.loc), expected_stats.loc.numpy(), atol=2e-6)
+    np.testing.assert_allclose(np.asarray(actual_stats.scale), expected_stats.scale.numpy(), atol=2e-6)
+
+    # Dropping censored cells is the training/serving mismatch this guards against:
+    # both twins must move together when the flag flips, and the flag must bite.
+    with torch.inference_mode():
+        _, expected_dropped = TorchCausalScaler(
+            patch_size=1, use_arcsinh=True, include_censored_in_stats=False
+        ).scale_input(torch_input)
+    _, actual_dropped = MLXCausalScaler(use_arcsinh=True, include_censored_in_stats=False).scale_input(mlx_input)
+    mx.eval(actual_dropped.loc, actual_dropped.scale)
+
+    np.testing.assert_allclose(np.asarray(actual_dropped.loc), expected_dropped.loc.numpy(), atol=2e-6)
+    np.testing.assert_allclose(np.asarray(actual_dropped.scale), expected_dropped.scale.numpy(), atol=2e-6)
+    assert not np.allclose(expected_stats.loc.numpy(), expected_dropped.loc.numpy())
+
+
 def test_attention_and_rotary_layers_match_pytorch_checkpoint() -> None:
     torch = pytest.importorskip("torch")
     t0 = pytest.importorskip("t0")
