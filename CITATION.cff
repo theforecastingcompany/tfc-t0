@@ -1,0 +1,47 @@
+cff-version: 1.2.0
+message: "If you use t0, please cite our technical report."
+title: "t0"
+authors:
+  - family-names: Meyer
+    given-names: Lucas
+  - family-names: Sole
+    given-names: Claudio
+  - family-names: Xiang
+    given-names: Huikan
+  - family-names: Li
+    given-names: Nicolas
+  - family-names: Franceschino
+    given-names: Lucas
+  - family-names: Quera-Bofarull
+    given-names: Arnau
+  - family-names: Scholl
+    given-names: Maarten P.
+  - family-names: Fainberg
+    given-names: Joachim
+  - family-names: Négiar
+    given-names: Geoffrey
+preferred-citation:
+  type: article
+  title: "$t_0$: A Time-Series Foundation Model for Forecasting with Context"
+  authors:
+    - family-names: Meyer
+      given-names: Lucas
+    - family-names: Sole
+      given-names: Claudio
+    - family-names: Xiang
+      given-names: Huikan
+    - family-names: Li
+      given-names: Nicolas
+    - family-names: Franceschino
+      given-names: Lucas
+    - family-names: Quera-Bofarull
+      given-names: Arnau
+    - family-names: Scholl
+      given-names: Maarten P.
+    - family-names: Fainberg
+      given-names: Joachim
+    - family-names: Négiar
+      given-names: Geoffrey
+  journal: "arXiv preprint arXiv:2609.24559"
+  year: 2026
+  url: "https://arxiv.org/abs/2609.24559"
