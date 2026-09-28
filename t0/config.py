@@ -5,9 +5,11 @@ return the hyperparameters of the two published checkpoints, t0-alpha and
 t0-beta respectively.
 """
 
+import json
 import sys
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import asdict, dataclass, fields
+from pathlib import Path
+from typing import Any, Literal
 
 if sys.version_info >= (3, 11):
     from typing import Self
@@ -24,7 +26,7 @@ ScalerEpsMode = Literal["variance_offset", "std_clamp"]
 class T0Config:
     """Hyperparameters for an instance of T0Forecaster.
 
-    ``quantile_levels`` must be a non-empty tuple of floats in ``(0, 1)``;
+    ``quantile_levels`` must be a non-empty, ascending tuple of unique floats in ``(0, 1)``;
     use ``T0Config.medium()`` for t0-alpha and ``T0Config.large()`` for
     t0-beta.
 
@@ -73,15 +75,56 @@ class T0Config:
     scaler_eps_mode: ScalerEpsMode = "variance_offset"
 
     def __post_init__(self) -> None:
+        positive = {
+            "embed_dim": self.embed_dim,
+            "num_layers": self.num_layers,
+            "num_heads": self.num_heads,
+            "mlp_hidden_dim": self.mlp_hidden_dim,
+            "patch_size": self.patch_size,
+        }
+        for name, value in positive.items():
+            if value < 1:
+                raise ValueError(f"{name} must be positive, got {value}")
+        if self.embed_dim % self.num_heads != 0:
+            raise ValueError("embed_dim must be divisible by num_heads")
+        if self.group_every_n > 0 and self.num_layers % self.group_every_n != 0:
+            raise ValueError("group_every_n must divide num_layers")
+        if not 0.0 <= self.dropout < 1.0:
+            raise ValueError(f"dropout must be in [0, 1), got {self.dropout}")
         if not self.quantile_levels:
-            raise ValueError("quantile_levels must be a non-empty tuple of floats in (0, 1)")
-        for q in self.quantile_levels:
-            if not (0.0 < q < 1.0):
-                raise ValueError(f"each quantile must be in (0, 1); got {q}")
+            raise ValueError("quantile_levels must be non-empty")
+        if tuple(sorted(set(self.quantile_levels))) != self.quantile_levels:
+            raise ValueError("quantile_levels must be sorted ascending without duplicates")
+        if any(not 0.0 < level < 1.0 for level in self.quantile_levels):
+            raise ValueError("each quantile level must be in (0, 1)")
         if self.scaler_eps <= 0.0:
-            raise ValueError(f"scaler_eps must be positive; got {self.scaler_eps}")
+            raise ValueError(f"scaler_eps must be positive, got {self.scaler_eps}")
         if self.scaler_eps_mode not in ("variance_offset", "std_clamp"):
-            raise ValueError(f"scaler_eps_mode must be 'variance_offset' or 'std_clamp'; got {self.scaler_eps_mode!r}")
+            raise ValueError(f"scaler_eps_mode must be 'variance_offset' or 'std_clamp', got {self.scaler_eps_mode!r}")
+
+    @classmethod
+    def from_dict(cls, values: dict[str, Any]) -> Self:
+        """Construct from the JSON-compatible configuration mapping."""
+        names = {field.name for field in fields(cls)}
+        filtered = {key: value for key, value in values.items() if key in names}
+        if "quantile_levels" in filtered:
+            filtered["quantile_levels"] = tuple(filtered["quantile_levels"])
+        return cls(**filtered)
+
+    @classmethod
+    def from_json(cls, path: str | Path) -> Self:
+        """Load a configuration from `config.json`."""
+        with Path(path).open(encoding="utf-8") as config_file:
+            values = json.load(config_file)
+        if not isinstance(values, dict):
+            raise ValueError("config must contain a JSON object")
+        return cls.from_dict(values)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-compatible representation."""
+        values = asdict(self)
+        values["quantile_levels"] = list(self.quantile_levels)
+        return values
 
     @classmethod
     def medium(cls) -> Self:

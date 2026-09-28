@@ -20,7 +20,7 @@ try:
 except ImportError as err:  # pragma: no cover - exercised only without the extra
     raise ImportError('t0.evaluation requires the evaluation extra: pip install "tfc-t0[evaluation]"') from err
 
-from t0.model import T0Forecaster
+from t0.torch.model import T0Forecaster
 
 logger = logging.getLogger(__name__)
 

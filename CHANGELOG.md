@@ -6,8 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking.** `tfc-t0` is now one package with two runtimes, one for mlx and
+  one for torch: install `pip install "tfc-t0[torch]"` or
+  `pip install "tfc-t0[mlx]"` (a bare `pip install tfc-t0` installs neither),
+  and `t0_mlx` becomes `t0.mlx`, superseding the `tfc-t0-mlx` distribution.
+  The code both runtimes share has been factorized into framework-free modules
+  of `t0`, and the PyTorch model moved from `t0.model` to `t0.torch.model`;
+  `from t0 import T0Forecaster` still returns the PyTorch runtime. The MLX
+  runtime now runs the PyTorch runtime's `predict`, with its arguments and its
+  float32 quantile interpolation.
+
 ### Added
 
+- The MLX runtime accepts a `TimeSeries` as input, including typed rows
+  (historical and known-future covariates in shared groups) in any order,
+  and gains `TimeSeries.batch`.
 - A [notebook](https://github.com/theforecastingcompany/tfc-t0/blob/main/notebooks/03_electricity_day_ahead_prices.ipynb)
   showcasing `t0` on European electricity spot prices.
 - A link to the `t0` paper on [arXiv](https://arxiv.org/abs/2609.24559).
@@ -22,13 +37,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   edge that never received gradient. Forecasts without future covariates are
   bit-identical; forecasts with them change, by a few percent of the series
   scale with one to four covariates and more with many.
-  `MaskBuilder.build_group_mask` now takes `patch_variate_type`.
+  The group mask now depends on each patch's variate type
+  (`t0.mask.build_attention_masks`). Both runtimes carry the fix.
 - A patch now takes its variate type from its first non-padding time step,
   as in training. When a context length is not a multiple of the patch size
   the runtime left-pads the first patch, and that patch on a covariate row
   was embedded as a target. Forecasts change only for covariate rows with
   such a partial first patch: `t0-alpha` and `t0-beta` learned the old rule
-  and move slightly there; later checkpoints expect the new one.
+  and move slightly there; later checkpoints expect the new one. Both
+  runtimes carry the fix.
 
 ## [0.5.0] - 2026-09-17
 
@@ -193,3 +210,33 @@ It resulted in degraded performances of the model.
 
 ### Added
 - Initial public release of the open-weights t0-alpha forecasting model.
+
+## tfc-t0-mlx (superseded)
+
+The MLX runtime was published separately as `tfc-t0-mlx`, with the `t0_mlx`
+import name, before it moved into this package as `t0.mlx`. Its releases are
+listed here for reference.
+
+### tfc-t0-mlx 0.1.0a1 - 2026-09-05
+
+#### Fixed
+
+- Preserve annotated release tags during source verification and build from
+  the verified commit. The `0.1.0a0` publication stopped at source verification;
+  this release contains the same runtime implementation.
+- Document the full FP32 setting used for checkpoint parity on Apple M5.
+
+### tfc-t0-mlx 0.1.0a0 - 2026-09-04
+
+#### Added
+
+- First-party, inference-only MLX implementation of `t0-alpha`.
+- Direct loading of the original `config.json` and `model.safetensors` without
+  rewriting weights.
+- Univariate and multivariate forecasting, typed masks, explicit grouping,
+  known-future covariates, quantile interpolation and autoregressive rollout.
+- Opt-in compilation for repeated input shapes.
+- Checkpoint-backed FP32 parity coverage against the first-party PyTorch
+  implementation.
+- Reproducible comparisons with PyTorch MPS and CPU on Apple silicon.
+- Versioned parity attestations and a tag-bound release pipeline.

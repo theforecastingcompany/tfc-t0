@@ -30,12 +30,32 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
 ]
+# The base install is the framework-free core; each runtime is an extra. There is no
+# default extra in Python packaging, so `pip install tfc-t0` alone gets no runtime.
 dependencies = [
     # Floor-only version constraints: we pin the minimum versions we've tested
     # against but deliberately avoid upper caps, so downstream integrators
     # (e.g. Darts, which depends on tfc-t0 as an optional extra) can resolve
     # newer releases without being blocked. If a future major release breaks
     # us, bump the floor instead of reintroducing a cap.
+    "huggingface-hub>=1",
+    # numpy: accepted as input by predict() via duck typing, and the host-side
+    # format of every array builder.
+    "numpy>=1.26",
+    # jaxtyping: shape-annotated signatures (annotations only — no runtime
+    # checker is installed, so there is no runtime cost). Floor at 0.2.24 for
+    # coexistence with packages that pin jaxtyping<0.3 (e.g. uni2ts, pulled in
+    # alongside t0 by timecopilot).
+    "jaxtyping>=0.2.24",
+    # typing-extensions backports typing.Self (PEP 673) to Python 3.10. On
+    # 3.11+ Self comes from the stdlib, so the marker keeps this off the
+    # dependency set there.
+    "typing-extensions>=4 ; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+# t0.torch — the PyTorch runtime (the default `t0.T0Forecaster`).
+torch = [
     "torch>=2.4",
     # einops floor at 0.7: t0 only uses rearrange/repeat (stable since 0.7),
     # and downstream integrators (e.g. timecopilot via uni2ts) pin
@@ -43,30 +63,19 @@ dependencies = [
     "einops>=0.7",
     # rotary-embedding-torch is verified against the 0.8.x line in NOTICE.
     "rotary-embedding-torch>=0.8",
-    "huggingface-hub>=1",
+    # safetensors.torch reads and writes the checkpoint (MLX reads it natively).
     "safetensors>=0.4",
-    # numpy: required by safetensors.torch.save_file/load_file at runtime
-    # (it uses np.prod for buffer sizing); also accepted as input by predict()
-    # via duck typing (no import in t0/ code).
-    "numpy>=1.26",
-    # jaxtyping: shape-annotated tensor signatures (annotations only — no
-    # runtime checker is installed, so there is no runtime cost). Floor at
-    # 0.2.24 for coexistence with packages that pin jaxtyping<0.3 (e.g.
-    # uni2ts, pulled in alongside t0 by timecopilot).
-    "jaxtyping>=0.2.24",
-    # typing-extensions backports typing.Self (PEP 673) to Python 3.10. On
-    # 3.11+ Self comes from the stdlib, so the marker keeps this off the
-    # dependency set there (it's still present transitively via torch).
-    "typing-extensions>=4 ; python_version < '3.11'",
 ]
-
-[project.optional-dependencies]
-# t0.evaluation — GluonTS-style predictor for benchmark evaluation.
-evaluation = ["gluonts>=0.15", "tqdm>=4.66"]
+# t0.mlx — the MLX runtime. MLX ships wheels for Apple silicon only; elsewhere the
+# extra installs nothing and `import t0.mlx` says so.
+mlx = ["mlx>=0.32.2 ; sys_platform == 'darwin' and platform_machine == 'arm64'"]
+# t0.evaluation — GluonTS-style predictor for benchmark evaluation (PyTorch runtime).
+evaluation = ["tfc-t0[torch]", "gluonts>=0.15", "tqdm>=4.66"]
 # t0.utils — forecast plotting with the t0-alpha (Retrocast) style.
 plot = ["matplotlib>=3.8"]
 # notebooks/ — dependencies for the inference, LoRA, and electricity-price examples.
 notebooks = [
+    "tfc-t0[torch]",
     "peft>=0.11",
     "accelerate>=0.30",
     "ipykernel>=6.29",
@@ -89,9 +98,23 @@ Changelog = "https://github.com/theforecastingcompany/tfc-t0/blob/main/CHANGELOG
 
 [dependency-groups]
 dev = [
+    # Both runtimes, so the suite covers each and the cross-runtime checks (MLX installs
+    # on arm64 macOS only; its tests skip elsewhere).
+    "tfc-t0[torch,mlx]",
     "pytest>=8.0",
     "ruff>=0.8",
     "ty>=0.0.17",
+    { include-group = "onnx" },
+]
+# The ONNX export, quantization and validation experiments under experiments/onnx/
+# (and their tests). Floors follow experiments/onnx/requirements-portable.txt;
+# onnxruntime 1.29 needs Python 3.11, so on 3.10 the group installs nothing.
+onnx = [
+    "tfc-t0[torch]",
+    "onnx>=1.22 ; python_version >= '3.11'",
+    "onnxruntime>=1.29 ; python_version >= '3.11'",
+    # torch.onnx's exporter; brings onnx-ir.
+    "onnxscript>=0.7.1 ; python_version >= '3.11'",
 ]
 # Tools required by the internal CLIs under tools/. Not imported by the
 # t0/ package itself.
@@ -116,7 +139,7 @@ gift-eval = [
 # fev-bench evaluation (tools/evaluate_fev_bench.py). `fev` pulls the
 # autogluon/fev_datasets task suite from the Hub at run time.
 fev-bench = [
-    "tfc-t0",
+    "tfc-t0[torch]",
     "fev>=0.9.0",
     "datasets>=4",
     "pandas>=2",
@@ -148,10 +171,6 @@ build-backend = "hatchling.build"
 # tests (tests/) are deliberately excluded — guarded by test_wheel.py.
 # LICENSE + NOTICE are picked up automatically via [project.license-files].
 packages = ["t0"]
-
-[tool.hatch.build.targets.sdist]
-# The MLX runtime is a separate distribution built from mlx/pyproject.toml.
-exclude = ["/mlx"]
 
 [tool.ruff]
 line-length = 120

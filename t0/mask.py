@@ -1,112 +1,24 @@
-"""Attention mask helpers, operating on per-patch tensors.
+"""Attention masks built from per-patch metadata, shared by every runtime.
 
-Naming: a ``patched_`` prefix marks a tensor reshaped into patches but still per-time-step,
-``(V, P, patch_size)``; a ``patch_`` prefix marks one value per patch, ``(V, P)``. The
-helpers here reduce the former to the latter, and the builder consumes only the latter.
+Naming: a ``patched_`` prefix marks an array reshaped into patches but still per-time-step,
+``(V, P, patch_size)``; a ``patch_`` prefix marks one value per patch, ``(V, P)``.
+Convention: ``True`` = can attend, ``False`` = blocked (as scaled-dot-product attention takes it).
 """
 
-import torch
+from typing import Any
+
 from jaxtyping import Bool, Int
-from torch import Tensor
 
-from t0.data import MaskType, VariateType
+from t0._ops import ArrayT, ops_for
+from t0.types import MaskType, VariateType
 
-
-class MaskBuilder:
-    """Build SDPA attention masks from per-patch ``group_ids`` and ``variate_type``.
-
-    Two masks per forward pass:
-
-    - **per-patch group mask** ``(P, V, V)`` — at each patch, only variates
-      that share a ``group_ids`` value can attend, and a future-covariate
-      query reads future-covariate keys only, so information flows from
-      covariates into targets and never back. For inference inputs (one
-      independent series per row) every row has a unique group id and the
-      mask reduces to the identity.
-    - **per-variate time mask** ``(V, 1, P, P)`` — causal for target /
-      historical variates, bidirectional for futures.
-
-    Convention: ``True`` = can attend, ``False`` = blocked (matches
-    ``F.scaled_dot_product_attention``).
-    """
-
-    def build_group_mask(
-        self,
-        patch_group_ids: Int[Tensor, "variates patches"],
-        patch_variate_type: Int[Tensor, "variates patches"],
-    ) -> Bool[Tensor, "patches variates variates"]:
-        """Per-patch ``(P, V, V)`` mask; ``-1`` marks padding patches.
-
-        A future-covariate query may not read target or historical keys. The
-        diagonal stays valid (a future row reads itself), so every query keeps at
-        least one unmasked key.
-        """
-        valid = patch_group_ids >= 0
-
-        ids_t = patch_group_ids.T
-        val_t = valid.T
-        same_group = ids_t.unsqueeze(2) == ids_t.unsqueeze(1)
-        both_valid = val_t.unsqueeze(2) & val_t.unsqueeze(1)
-
-        is_future = (patch_variate_type == VariateType.FUTURE).T
-        future_reads_non_future = is_future.unsqueeze(2) & ~is_future.unsqueeze(1)
-        return same_group & both_valid & ~future_reads_non_future
-
-    def build_time_mask(
-        self,
-        patch_group_ids: Int[Tensor, "variates patches"],
-        patch_variate_type: Int[Tensor, "variates patches"],
-        padding_mask: Bool[Tensor, "variates patches"] | None,
-    ) -> Bool[Tensor, "variates 1 patches patches"]:
-        """Per-variate causal time mask ``(V, 1, P, P)``.
-
-        Causal for target / historical variates, bidirectional for futures.
-        """
-        seq_len = patch_group_ids.shape[1]
-        device = patch_group_ids.device
-
-        valid_patch = patch_group_ids >= 0
-        same_doc = (
-            (patch_group_ids.unsqueeze(2) == patch_group_ids.unsqueeze(1))
-            & valid_patch.unsqueeze(2)
-            & valid_patch.unsqueeze(1)
-        )
-        causal = torch.ones(seq_len, seq_len, device=device, dtype=torch.bool).tril(diagonal=0)
-        is_future = patch_variate_type == VariateType.FUTURE
-
-        mask = same_doc & causal.unsqueeze(0)
-        future_query = is_future.unsqueeze(2)
-        mask = torch.where(future_query, same_doc, mask)
-
-        if padding_mask is not None:
-            key_valid = ~padding_mask.unsqueeze(1)
-            mask = mask & key_valid
-
-        return mask.unsqueeze(1)
-
-    def expand_group_mask(
-        self, group_mask: Bool[Tensor, "patches variates variates"]
-    ) -> Bool[Tensor, "patches 1 variates variates"]:
-        """Add the head broadcast dim so the mask shape is ``(P, 1, V, V)``."""
-        return group_mask.unsqueeze(1)
-
-
-def compute_patch_attention_mask(
-    patched_mask: Int[Tensor, "variates patches patch_size"],
-) -> Bool[Tensor, "variates patches"]:
-    """Boolean mask ``(V, P)`` indicating which patch to attend.
-
-    A patch is attended if it holds at least one non-PAD time step. In the attention mask
-    True means *attend*, the opposite of the ``padding_mask`` the builder takes.
-    """
-    all_pad = (patched_mask == MaskType.PAD).all(dim=-1)
-    return ~all_pad
+__all__ = ["build_attention_masks", "reduce_patch_metadata"]
 
 
 def reduce_patch_metadata(
-    patched_metadata: Int[Tensor, "variates patches patch_size"],
-    patched_mask: Int[Tensor, "variates patches patch_size"],
-) -> Int[Tensor, "variates patches"]:
+    patched_metadata: Int[ArrayT, "variates patches patch_size"],
+    patched_mask: Int[Any, "variates patches patch_size"],
+) -> Int[ArrayT, "variates patches"]:
     """Collapse patched metadata to each patch's first non-PAD time step, or ``-1`` when fully PAD.
 
     Args:
@@ -116,7 +28,55 @@ def reduce_patch_metadata(
     Returns:
         One value per patch.
     """
+    ops = ops_for(patched_metadata)
     is_real = patched_mask != MaskType.PAD
-    first_real = is_real.int().argmax(dim=-1, keepdim=True)
-    reduced = patched_metadata.gather(-1, first_real).squeeze(-1)
-    return reduced.masked_fill(~is_real.any(dim=-1), -1)
+    first_real = ops.argmax(ops.astype(is_real, ops.int32), axis=-1, keepdims=True)
+    reduced = ops.squeeze(ops.take_along_axis(patched_metadata, first_real, axis=-1), axis=-1)
+    return ops.where(
+        ops.any(is_real, axis=-1), reduced, ops.full((), -1, dtype=reduced.dtype, device=ops.device(reduced))
+    )
+
+
+def build_attention_masks(
+    patched_group_ids: Int[ArrayT, "variates patches patch_size"],
+    patched_variate_type: Int[ArrayT, "variates patches patch_size"],
+    patched_mask: Int[ArrayT, "variates patches patch_size"],
+) -> tuple[Bool[ArrayT, "variates 1 patches patches"], Bool[ArrayT, "patches 1 variates variates"]]:
+    """The two masks of one forward pass.
+
+    - **per-variate time mask** ``(V, 1, P, P)`` — causal for target / historical
+      variates, bidirectional for futures; a patch attends only patches of its own
+      series, and no query reads an all-PAD patch.
+    - **per-patch group mask** ``(P, 1, V, V)`` — at each patch, only variates that
+      share a group id attend to one another, and a future-covariate query reads
+      future-covariate keys only, so information flows from covariates into targets and
+      never back. The diagonal stays valid, so every real query keeps a key.
+    """
+    ops = ops_for(patched_group_ids)
+    patch_group_ids = reduce_patch_metadata(patched_group_ids, patched_mask)
+    patch_variate_type = reduce_patch_metadata(patched_variate_type, patched_mask)
+    attendable = ops.any(patched_mask != MaskType.PAD, axis=-1)
+    valid = patch_group_ids >= 0
+    is_future = patch_variate_type == VariateType.FUTURE
+
+    same_series = (
+        (ops.expand_dims(patch_group_ids, axis=2) == ops.expand_dims(patch_group_ids, axis=1))
+        & ops.expand_dims(valid, axis=2)
+        & ops.expand_dims(valid, axis=1)
+    )
+    positions = ops.arange(patch_group_ids.shape[1], device=ops.device(patch_group_ids))
+    causal = ops.expand_dims(positions, axis=1) >= ops.expand_dims(positions, axis=0)
+    # Boolean logic rather than a boolean `where`, which some ONNX runtimes (ORT CPU/WASM) lack.
+    future_query = ops.expand_dims(is_future, axis=2)
+    time_mask = (future_query & same_series) | (~future_query & same_series & causal)
+    time_mask = time_mask & ops.expand_dims(attendable, axis=1)
+
+    ids_by_patch, valid_by_patch, future_by_patch = patch_group_ids.T, valid.T, is_future.T
+    group_mask = (
+        (ops.expand_dims(ids_by_patch, axis=2) == ops.expand_dims(ids_by_patch, axis=1))
+        & ops.expand_dims(valid_by_patch, axis=2)
+        & ops.expand_dims(valid_by_patch, axis=1)
+    )
+    future_reads_non_future = ops.expand_dims(future_by_patch, axis=2) & ~ops.expand_dims(future_by_patch, axis=1)
+    group_mask = group_mask & ~future_reads_non_future
+    return ops.expand_dims(time_mask, axis=1), ops.expand_dims(group_mask, axis=1)
