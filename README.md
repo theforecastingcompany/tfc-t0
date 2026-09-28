@@ -8,9 +8,11 @@
 # `t0`
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2609.24559"><img src="https://img.shields.io/badge/arXiv-2609.24559-b31b1b.svg" alt="arXiv" /></a>
   <a href="https://pypi.org/project/tfc-t0/"><img src="https://img.shields.io/pypi/v/tfc-t0" alt="PyPI" /></a>
   <a href="https://pypi.org/project/tfc-t0/"><img src="https://img.shields.io/pypi/pyversions/tfc-t0" alt="Python versions" /></a>
   <a href="https://github.com/theforecastingcompany/tfc-t0/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/tfc-t0" alt="License" /></a>
+  <a href="https://colab.research.google.com/github/theforecastingcompany/tfc-t0/blob/main/notebooks/01_inference_quickstart.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open inference quickstart in Colab" /></a>
 </p>
 
 Open-weights time-series forecasting foundation model from [The Forecasting Company](https://theforecastingcompany.com/).
@@ -26,14 +28,15 @@ You can use `t0` on [Retrocast](https://app.retrocast.com/), our platform for fo
 
 ## Choose how to run `t0-beta`
 
-This repository contains the first-party PyTorch and MLX runtimes, published
-as separate packages so each installation keeps only its native tensor
-backend. ONNX artifacts and our managed API cover other deployment targets:
+The `tfc-t0` package contains the first-party PyTorch and MLX runtimes. Each
+runtime is an extra, so an installation carries only the tensor framework it
+uses. A bare `pip install tfc-t0` installs neither runtime: choose one with its
+extra. ONNX artifacts and our managed API cover other deployment targets:
 
 | Use case | Install or open |
 | --- | --- |
-| Local inference with PyTorch | `pip install "tfc-t0>=0.5.0"` |
-| Local inference on Apple silicon with MLX | `pip install "tfc-t0-mlx>=0.1.0"` |
+| Local inference with PyTorch | `pip install "tfc-t0[torch]>=0.5.0"` |
+| Local inference on Apple silicon with MLX | `pip install "tfc-t0[mlx]>=0.6.0"` |
 | Accelerator-oriented local and edge inference with ONNX FP16 | [`t0-alpha-onnx-fp16`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) |
 | CPU and in-browser inference with ONNX INT8 | [`t0-alpha-onnx-int8`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) |
 | Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com) |
@@ -41,7 +44,7 @@ backend. ONNX artifacts and our managed API cover other deployment targets:
 The ONNX artifacts are built from `t0-alpha`; there is no `t0-beta` ONNX
 export yet.
 
-The MLX runtime lives in [`mlx/`](mlx/). It is inference-only, has a closely
+The [MLX runtime](#mlx-runtime-apple-silicon) is inference-only, has a closely
 matched `T0Forecaster.predict()` API, loads the same safetensors directly, and
 does not install PyTorch.
 
@@ -62,6 +65,12 @@ available, to improve its forecast.
 _Data: [Medic'AM](https://www.assurance-maladie.ameli.fr/etudes-et-donnees/medicaments-classe-atc-medicam),
 monthly drug reimbursements from the French national health insurance._
 
+For a complete worked example, the
+[European day-ahead electricity prices notebook](https://github.com/theforecastingcompany/tfc-t0/blob/main/notebooks/03_electricity_day_ahead_prices.ipynb)
+forecasts hourly prices in four bidding zones with load, renewable, holiday
+and weather covariates, and backtests the result.
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/theforecastingcompany/tfc-t0/blob/main/notebooks/03_electricity_day_ahead_prices.ipynb)
+
 The [Quickstart](#-quickstart) below shows the API for both a plain
 univariate forecast and a multivariate forecast that conditions on
 historical and known-future covariates.
@@ -69,7 +78,7 @@ historical and known-future covariates.
 ## 🚀 Quickstart
 
 ```bash
-pip install "tfc-t0>=0.5.0"
+pip install "tfc-t0[torch]>=0.5.0"
 ```
 
 `t0-beta` normalizes its inputs differently from `t0-alpha`, and carries the
@@ -97,11 +106,7 @@ single-row batch. NaN in the context is read as a missing observation. To
 say that some cells are padding instead, pass a `mask`. See
 [batched inference](#batched-inference).
 
-`t0-beta` downloads without authentication. `t0-alpha` is gated: sign in to
-[its model page](https://huggingface.co/theforecastingcompany/t0-alpha),
-accept the access conditions, then run `hf auth login` (or, in a notebook,
-`from huggingface_hub import login; login()`) and pass `token=True` to
-`from_pretrained`.
+`t0-alpha` and `t0-beta` are public and download without authentication.
 
 ### Forecasting with covariates
 
@@ -206,6 +211,64 @@ is the entry point for fine-tuning.
 **For efficient inference at scale, look at
 [Retrocast](https://app.retrocast.com/).**
 
+## MLX runtime (Apple silicon)
+
+`t0.mlx` is a first-party, inference-only runtime built on
+[MLX](https://github.com/ml-explore/mlx). It needs Apple silicon, macOS 14 or
+newer, and a native arm64 Python 3.10 or newer, and it does not install
+PyTorch:
+
+```bash
+pip install "tfc-t0[mlx]>=0.6.0"
+```
+
+It loads the same checkpoints as the PyTorch runtime. MLX uses the Apple GPU
+automatically; there is no device selection or `.to("mps")` step. `predict`
+takes NumPy or MLX arrays:
+
+```python
+import numpy as np
+from t0.mlx import T0Forecaster
+
+model = T0Forecaster.from_pretrained("theforecastingcompany/t0-alpha").eval()
+
+context = np.random.randn(4, 512).astype(np.float32)  # 4 series, 512 past timesteps
+out = model.predict(context, horizon=64, quantile_levels=[0.1, 0.5, 0.9])
+out.quantiles.shape  # (4, 64, 3)
+out.median.shape     # (4, 64)
+```
+
+`t0.mlx` exports `T0Forecaster`, `Forecast`, `T0Config`, `TimeSeries`,
+`MaskType`, `VariateType` and `batch_series`, with the same meaning as above:
+both runtimes share one implementation of everything but the network layers,
+so `predict` takes the same arguments, including a `TimeSeries`. It covers
+univariate and multivariate inputs, missing values, explicit groups,
+known-future covariates (`future_covariates=`), quantile interpolation with
+exponential tails, and autoregressive rollout past the native 1024-step pass. Compilation is opt-in
+and pays off for a shape you call repeatedly:
+
+```python
+model.compile()
+out = model.predict(context, horizon=64)
+```
+
+On an Apple M1 Pro, compiled MLX was 3.37–3.59x faster than PyTorch MPS and
+5.23–6.86x faster than PyTorch CPU across three representative `t0-alpha`
+workloads, excluding model loading and the compiled path's first call. See
+[`BENCHMARKS.md`](https://github.com/theforecastingcompany/tfc-t0/blob/main/BENCHMARKS.md) for the method and raw timings, and
+[`PARITY.md`](https://github.com/theforecastingcompany/tfc-t0/blob/main/PARITY.md) for the checkpoint-backed numerical parity record.
+
+The MLX parameter tree has the same tensor names, shapes and dtypes as the
+checkpoint, so no conversion or separate MLX checkpoint is needed;
+`tools/validate_mlx_checkpoint.py` checks that contract for a local
+checkpoint. The runtime's tests live in `tests/mlx/`:
+
+```bash
+uv sync
+uv run pytest tests/mlx
+T0_MLX_CHECKPOINT=/path/to/t0-alpha uv run pytest tests/mlx  # + checkpoint-backed parity
+```
+
 ## 🏗️ Architecture
 
 `t0` is a decoder-style patch transformer that alternates time and
@@ -236,11 +299,18 @@ models. We gratefully acknowledge:
   factorizing attention in the time and variates dimension.
 - **TiRex** by NXAI
   ([repo](https://github.com/NX-AI/tirex)) — contiguous patch masking.
+- **rotary-embedding-torch** by Phil Wang
+  ([repo](https://github.com/lucidrains/rotary-embedding-torch)) — rotary
+  position embeddings, used by the PyTorch runtime and followed by the MLX
+  one.
 
-Code-level attributions are listed in [`NOTICE`](NOTICE), all under
-Apache-2.0.
+Code-level attributions are listed in [`NOTICE`](NOTICE), under their
+respective open-source licenses.
 
 ## 🧰 Public API
+
+`from t0 import ...` is the PyTorch runtime (also importable as `t0.torch`);
+`t0.mlx` mirrors the names it shares, as described [above](#mlx-runtime-apple-silicon).
 
 - `T0Forecaster` — `nn.Module` with `from_pretrained` /
   `save_pretrained` (via `huggingface_hub.PyTorchModelHubMixin`). It has two
@@ -261,14 +331,15 @@ Apache-2.0.
 
 ## 📚 Citation
 
-If our model is useful, please use the following citation and star our repo!
+If our model is useful, please cite our [paper](https://arxiv.org/abs/2609.24559) and star our repo!
 
 ```bibtex
-@misc{tfc-t0,
-  title  = {t0: A time-series forecasting foundation model},
-  author = {The Forecasting Company},
-  year   = {2026},
-  url    = {https://huggingface.co/theforecastingcompany/t0-beta},
+@article{meyer2026t0,
+  title   = {$t_0$: A Time-Series Foundation Model for Forecasting with Context},
+  author  = {Meyer, Lucas and Sole, Claudio and Xiang, Huikan and Li, Nicolas and Franceschino, Lucas and Quera-Bofarull, Arnau and Scholl, Maarten P. and Fainberg, Joachim and N{\'e}giar, Geoffrey},
+  journal = {arXiv preprint arXiv:2609.24559},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2609.24559},
 }
 ```
 

@@ -1,0 +1,290 @@
+# Copyright 2026 The Forecasting Company
+# The layer structure follows the first-party t0 PyTorch implementation. Its
+# patched-transformer and rotary backbone is adapted from Datadog's Toto
+# (https://github.com/DataDog/toto); the patch encoding and variate-attention
+# patterns build on Chronos-2
+# (https://github.com/amazon-science/chronos-forecasting).
+# Copyright 2025 Datadog, Inc.
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""MLX-native leaf layers used by t0-alpha."""
+
+import math
+from collections.abc import Callable, Sequence
+
+import mlx.core as mx
+import mlx.nn as nn
+
+from t0.mask import build_attention_masks, reduce_patch_metadata
+
+
+class MLP(nn.Module):
+    """Two-layer perceptron with an activation between its projections."""
+
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        output_size: int,
+        dropout: float = 0.0,
+        activation: Callable[[mx.array], mx.array] = nn.relu,
+    ):
+        super().__init__()
+        self.hidden_layer = nn.Linear(input_size, hidden_size)
+        self.output_layer = nn.Linear(hidden_size, output_size)
+        self.dropout = nn.Dropout(dropout)
+        self.activation = activation
+
+    def __call__(self, x: mx.array) -> mx.array:
+        return self.output_layer(self.dropout(self.activation(self.hidden_layer(x))))
+
+
+class ResidualBlock(nn.Module):
+    """MLP summed with a learned projection of its input."""
+
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        output_size: int,
+        dropout: float = 0.0,
+        activation: Callable[[mx.array], mx.array] = nn.relu,
+    ):
+        super().__init__()
+        self.mlp = MLP(input_size, hidden_size, output_size, dropout, activation)
+        self.residual_layer = nn.Linear(input_size, output_size)
+
+    def __call__(self, x: mx.array) -> mx.array:
+        return self.mlp(x) + self.residual_layer(x)
+
+
+class PatchEncoder(nn.Module):
+    """Encode values, within-patch time, validity, and variate role."""
+
+    def __init__(self, embed_dim: int, patch_size: int):
+        super().__init__()
+        self.patch_size = patch_size
+        self.embed_dim = embed_dim
+        self.projection = ResidualBlock(patch_size * 3, embed_dim, embed_dim)
+        self.type_embeddings = nn.Embedding(3, embed_dim)
+
+    def __call__(self, values: mx.array, mask: mx.array, variate_type: mx.array) -> mx.array:
+        if values.ndim != 3 or values.shape[-1] != self.patch_size:
+            raise ValueError(f"values must be [variates, patches, {self.patch_size}]")
+        if mask.shape != values.shape or variate_type.shape != values.shape:
+            raise ValueError("mask and variate_type must match values")
+        total_variates, n_patches, _ = values.shape
+        validity = (mask == 0).astype(values.dtype)
+        time_index = mx.arange(self.patch_size, dtype=values.dtype) / self.patch_size
+        time_index = mx.broadcast_to(time_index, (total_variates, n_patches, self.patch_size))
+        embedded = self.projection(mx.concatenate([values, time_index, validity], axis=-1))
+        # Left padding must not retype a covariate row as a target. Fully padded
+        # patches reduce to the -1 sentinel, clamped to 0 here; masked downstream.
+        type_ids = mx.maximum(reduce_patch_metadata(variate_type, mask), mx.array(0, dtype=variate_type.dtype))
+        return embedded + self.type_embeddings(type_ids)
+
+
+class RMSNorm(nn.Module):
+    """RMS normalization with the checkpoint's 1e-8 epsilon."""
+
+    def __init__(self, dims: int, eps: float = 1e-8):
+        super().__init__()
+        self.scale = mx.ones((dims,))
+        self.eps = eps
+
+    def __call__(self, x: mx.array) -> mx.array:
+        return x * mx.rsqrt(mx.mean(mx.square(x), axis=-1, keepdims=True) + self.eps) * self.scale
+
+
+class SwiGLU(nn.Module):
+    """SwiGLU with the checkpoint's gate-first projection ordering."""
+
+    def __call__(self, x: mx.array) -> mx.array:
+        gate, values = mx.split(x, 2, axis=-1)
+        return nn.silu(gate) * values
+
+
+class QuantileHead(nn.Module):
+    """Turn raw decoder outputs into non-decreasing quantiles."""
+
+    def __init__(self, quantile_levels: Sequence[float]):
+        super().__init__()
+        self.quantile_levels = mx.array(sorted(quantile_levels), dtype=mx.float32)
+
+    @property
+    def n_quantiles(self) -> int:
+        return self.quantile_levels.size
+
+    def __call__(self, x: mx.array) -> mx.array:
+        first = x[..., :1]
+        if x.shape[-1] == 1:
+            return first
+        remaining = first + mx.cumsum(nn.softplus(x[..., 1:]), axis=-1)
+        return mx.concatenate([first, remaining], axis=-1)
+
+
+def _rotate_half(x: mx.array) -> mx.array:
+    paired = x.reshape(*x.shape[:-1], -1, 2)
+    return mx.stack([-paired[..., 1], paired[..., 0]], axis=-1).reshape(x.shape)
+
+
+class TimeAwareRotaryEmbedding:
+    """The checkpoint's temporal RoPE with XPos query/key scaling."""
+
+    def __init__(self, dims: int, theta: float = 10_000.0, scale_base: float = 512.0):
+        self.dims = dims
+        self.theta = theta
+        self.scale_base = scale_base
+
+    def rotate_queries_and_keys(self, queries: mx.array, keys: mx.array) -> tuple[mx.array, mx.array]:
+        seq_len = queries.shape[-2]
+        positions = mx.arange(seq_len, dtype=queries.dtype)
+        frequencies = 1.0 / (self.theta ** (mx.arange(0, self.dims, 2, dtype=mx.float32) / self.dims))
+        angles = mx.repeat(positions[:, None] * frequencies[None, :], 2, axis=-1)
+        cosine = mx.cos(angles)
+        sine = mx.sin(angles)
+
+        scale_frequencies = (mx.arange(0, self.dims, 2, dtype=mx.float32) + 0.4 * self.dims) / (1.4 * self.dims)
+        center = mx.floor(mx.max(positions) / 2.0)
+        power = (positions - center) / self.scale_base
+        half_scale = scale_frequencies[None, :] ** power[:, None]
+        scale = mx.repeat(half_scale, 2, axis=-1).astype(queries.dtype)
+
+        rotated_queries = (queries * cosine + _rotate_half(queries) * sine) * scale
+        rotated_keys = (keys * cosine + _rotate_half(keys) * sine) / scale
+        return rotated_queries.astype(queries.dtype), rotated_keys.astype(keys.dtype)
+
+
+class SelfAttention(nn.Module):
+    """Shared QKV projections for temporal and variate-axis attention."""
+
+    def __init__(self, embed_dim: int, num_heads: int, rotary: TimeAwareRotaryEmbedding | None = None):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.rotary = rotary
+        self.wQKV = nn.Linear(embed_dim, embed_dim * 3)
+        self.wO = nn.Linear(embed_dim, embed_dim)
+        self.q_norm = RMSNorm(self.head_dim)
+        self.k_norm = RMSNorm(self.head_dim)
+
+    def __call__(self, x: mx.array, attn_mask: mx.array) -> mx.array:
+        batch, seq_len, _ = x.shape
+        qkv = self.wQKV(x).reshape(batch, seq_len, 3, self.num_heads, self.head_dim)
+        qkv = qkv.transpose(2, 0, 3, 1, 4)
+        queries, keys, values = qkv[0], qkv[1], qkv[2]
+        queries, keys = self.q_norm(queries), self.k_norm(keys)
+        if self.rotary is not None:
+            queries, keys = self.rotary.rotate_queries_and_keys(queries, keys)
+        attended = mx.fast.scaled_dot_product_attention(
+            queries,
+            keys,
+            values,
+            scale=1.0 / math.sqrt(self.head_dim),
+            mask=attn_mask,
+        )
+        return self.wO(attended.transpose(0, 2, 1, 3).reshape(batch, seq_len, self.embed_dim))
+
+
+class TimeSelfAttentionBlock(nn.Module):
+    """Pre-norm time-axis attention with a residual connection."""
+
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float, rotary: TimeAwareRotaryEmbedding):
+        super().__init__()
+        self.norm = RMSNorm(embed_dim)
+        self.attention = SelfAttention(embed_dim, num_heads, rotary)
+        self.dropout = nn.Dropout(dropout)
+
+    def __call__(self, x: mx.array, attn_mask: mx.array) -> mx.array:
+        return x + self.dropout(self.attention(self.norm(x), attn_mask))
+
+
+class VariateSelfAttentionBlock(nn.Module):
+    """Pre-norm variate-axis attention with a residual connection."""
+
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float):
+        super().__init__()
+        self.norm = RMSNorm(embed_dim)
+        self.attention = SelfAttention(embed_dim, num_heads)
+        self.dropout = nn.Dropout(dropout)
+
+    def __call__(self, x: mx.array, attn_mask: mx.array) -> mx.array:
+        flipped = x.transpose(1, 0, 2)
+        attended = self.attention(self.norm(flipped), attn_mask)
+        return x + self.dropout(attended).transpose(1, 0, 2)
+
+
+class TransformerLayer(nn.Module):
+    """One attention block followed by a pre-norm SwiGLU feed-forward."""
+
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        mlp_hidden_dim: int,
+        dropout: float,
+        is_group: bool,
+        rotary: TimeAwareRotaryEmbedding,
+    ):
+        super().__init__()
+        self.is_group = is_group
+        if is_group:
+            self.attention_block = VariateSelfAttentionBlock(embed_dim, num_heads, dropout)
+        else:
+            self.attention_block = TimeSelfAttentionBlock(embed_dim, num_heads, dropout, rotary)
+        self.norm = RMSNorm(embed_dim)
+        self.mlp = [
+            nn.Linear(embed_dim, 2 * mlp_hidden_dim),
+            SwiGLU(),
+            nn.Linear(mlp_hidden_dim, embed_dim),
+            nn.Dropout(dropout),
+        ]
+
+    def __call__(self, x: mx.array, time_mask: mx.array, group_mask: mx.array) -> mx.array:
+        x = self.attention_block(x, group_mask if self.is_group else time_mask)
+        residual = self.mlp[0](self.norm(x))
+        residual = self.mlp[1](residual)
+        residual = self.mlp[2](residual)
+        return x + self.mlp[3](residual)
+
+
+class Transformer(nn.Module):
+    """Alternating time- and variate-attention stack."""
+
+    def __init__(
+        self,
+        num_layers: int,
+        embed_dim: int,
+        num_heads: int,
+        mlp_hidden_dim: int,
+        dropout: float,
+        group_every_n: int,
+    ):
+        super().__init__()
+        rotary = TimeAwareRotaryEmbedding(embed_dim // num_heads)
+        self.layers = [
+            TransformerLayer(
+                embed_dim,
+                num_heads,
+                mlp_hidden_dim,
+                dropout,
+                is_group=group_every_n > 0 and (index + 1) % group_every_n == 0,
+                rotary=rotary,
+            )
+            for index in range(num_layers)
+        ]
+        self.out_norm = RMSNorm(embed_dim)
+
+    def __call__(
+        self,
+        x: mx.array,
+        patched_group_ids: mx.array,
+        patched_variate_type: mx.array,
+        patched_mask: mx.array,
+    ) -> mx.array:
+        time_mask, group_mask = build_attention_masks(patched_group_ids, patched_variate_type, patched_mask)
+        for layer in self.layers:
+            x = layer(x, time_mask, group_mask)
+        return self.out_norm(x)

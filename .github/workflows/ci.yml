@@ -28,6 +28,29 @@ jobs:
       - name: Import smoke
         run: uv run python -c "from t0 import T0Config, T0Forecaster; print(T0Config.medium())"
 
+  mlx:
+    # The MLX runtime (the `mlx` extra) installs only on Apple silicon: MLX's macOS
+    # wheel requires native arm64 and macOS 14 or newer.
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: uv sync
+      - name: Type check
+        run: uv run ty check t0/mlx tools/benchmark_backends.py tools/validate_mlx_checkpoint.py
+      # The checkpoint-backed parity tests skip without a local checkpoint.
+      - name: Test
+        run: uv run pytest tests/mlx
+      - name: Import smoke
+        run: uv run python -c "from t0.mlx import T0Config, T0Forecaster; print(T0Config.medium())"
+
   metadata:
     # The release only discovers bad distribution metadata when the publish step
     # pre-flights it, by which point the tag is public. Run the same check on

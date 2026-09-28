@@ -8,7 +8,7 @@ import numpy as np
 from jaxtyping import Float
 from matplotlib.figure import Figure
 
-from t0.model import Forecast
+from t0.torch.model import Forecast
 from t0.utils.style import (
     COLOR_CONTEXT,
     COLOR_FCD_LINE,
