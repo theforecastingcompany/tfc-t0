@@ -19,7 +19,7 @@ import mlx.nn as nn
 from huggingface_hub import ModelHubMixin, hf_hub_download
 from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
 
-from t0.config import ScalerEpsMode, T0Config
+from t0.config import ScalerEpsMode, T0Config, XposScaleLayout
 from t0.data import TimeSeries
 from t0.forecaster import DEFAULT_MAX_HORIZON, ForecasterBase
 from t0.mlx.layers import PatchEncoder, QuantileHead, ResidualBlock, Transformer
@@ -60,6 +60,8 @@ class T0Forecaster(
         scaler_use_arcsinh: bool = True,
         scaler_eps: float = 0.1,
         scaler_eps_mode: ScalerEpsMode = "variance_offset",
+        xpos_scale_layout: XposScaleLayout = "interleaved",
+        scaler_zero_no_value: bool = True,
         **_: Any,
     ):
         super().__init__()
@@ -77,6 +79,8 @@ class T0Forecaster(
                 scaler_use_arcsinh=scaler_use_arcsinh,
                 scaler_eps=scaler_eps,
                 scaler_eps_mode=scaler_eps_mode,
+                xpos_scale_layout=xpos_scale_layout,
+                scaler_zero_no_value=scaler_zero_no_value,
             )
         )
         self.head = QuantileHead(quantile_levels)
@@ -88,6 +92,7 @@ class T0Forecaster(
             mlp_hidden_dim,
             dropout,
             group_every_n,
+            xpos_scale_layout,
         )
         self.decoder = ResidualBlock(embed_dim, embed_dim, patch_size * self.head.n_quantiles)
         self._compiled_single_pass = None

@@ -8,10 +8,13 @@ the scope ``predict`` runs in, and materializing lazy results.
 
 import contextlib
 import dataclasses
+import math
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any
+
+import numpy as np
 
 from t0._ops import ops_for
 from t0.config import T0Config
@@ -22,7 +25,7 @@ from t0.patcher import Patcher
 from t0.quantile import extrapolate_quantiles, sanitize_predictions
 from t0.rollout import rollout
 from t0.scaler import CausalScaler
-from t0.types import VariateType
+from t0.types import MaskType, VariateType
 
 if sys.version_info >= (3, 11):
     from typing import Self
@@ -63,7 +66,10 @@ class ForecasterBase(ABC):
         self.max_horizon = DEFAULT_MAX_HORIZON
         self.patcher = Patcher(config.patch_size)
         self.scaler = CausalScaler(
-            use_arcsinh=config.scaler_use_arcsinh, eps=config.scaler_eps, eps_mode=config.scaler_eps_mode
+            use_arcsinh=config.scaler_use_arcsinh,
+            eps=config.scaler_eps,
+            eps_mode=config.scaler_eps_mode,
+            zero_no_value=config.scaler_zero_no_value,
         )
 
     @abstractmethod
@@ -116,6 +122,10 @@ class ForecasterBase(ABC):
         future_covariates: Any = None,
         mask: Any = None,
         group_ids: Any = None,
+        trim_leading_missing: bool = False,
+        symmetric_averaging: bool = False,
+        clip_nonnegative: bool = False,
+        snap_integers: bool = False,
     ) -> Forecast:
         """Forecast ``horizon`` future timesteps, continuing auto-regressively past ``max_horizon``.
 
@@ -141,6 +151,19 @@ class ForecasterBase(ABC):
             group_ids: Array inputs only. One id per context row, marking which rows are
                 variates of the same series; rows sharing an id are forecast jointly. Defaults
                 to one series per sample. Cannot be combined with ``future_covariates``.
+            trim_leading_missing: Treat the missing stretch before a series' first
+                observation as padding, on its target and covariate rows alike.
+            symmetric_averaging: Average each quantile ``q`` with minus quantile ``1 - q`` of the
+                forecast of the negated series (target and covariates negated, missing values
+                linearly interpolated in the negated copy only). Runs the model twice. Skipped
+                for a target row whose observed context has a minimum of exactly zero.
+            clip_nonnegative: Clip a target row's forecast at zero when its observed context
+                is non-negative.
+            snap_integers: Round a target row's forecast to integers when its observed context
+                is integer-valued.
+
+            The four adjustments use only each series' own history and are off by default;
+            enabling all four is the recommended setting.
 
         Returns:
             Quantiles shaped ``[B, horizon, Q]`` or ``[B, V, horizon, Q]`` for array inputs,
@@ -203,6 +226,37 @@ class ForecasterBase(ABC):
                 f"for context_length={context_length} and horizon={horizon}, got {series.seq_len}"
             )
 
+        if trim_leading_missing:
+            series = _trim_leading_missing(series, context_length)
+        levels = _with_mirrors(quantile_levels) if symmetric_averaging else quantile_levels
+        predictions = self._forecast(series, horizon, context_length, levels, target_rows)
+        if symmetric_averaging or clip_nonnegative or snap_integers:
+            history = _observed_history(series, context_length, target_rows)
+            values = _to_host(predictions).astype(np.float64)
+            if symmetric_averaging:
+                # Rows floored at zero keep f(x), so with none to average the mirrored pass is skipped.
+                negated = (
+                    _to_host(self._forecast(_negated(series), horizon, context_length, levels, target_rows))
+                    if _averaged_rows(history).any()
+                    else values
+                )
+                values = _symmetric_average(values, negated, levels, quantile_levels, history)
+            values = _bound_to_history(values, history, clip_nonnegative, snap_integers)
+            ops = ops_for(predictions)
+            predictions = ops.asarray(values.astype(np.float32), device=ops.device(predictions))
+        if batch_shape is not None:
+            predictions = ops_for(predictions).reshape(predictions, (*batch_shape, *predictions.shape[1:]))
+        return Forecast(quantiles=self._materialize(predictions), quantile_levels=tuple(quantile_levels))
+
+    def _forecast(
+        self,
+        series: TimeSeries,
+        horizon: int,
+        context_length: int,
+        quantile_levels: tuple[float, ...],
+        target_rows: list[int],
+    ) -> Any:
+        """One rollout of ``series`` at ``quantile_levels``: ``[targets, horizon, Q]``."""
         rollout_levels = get_rollout_quantile_levels(self.config.quantile_levels, quantile_levels)
         with self._predict_scope():
             predictions = rollout(
@@ -217,10 +271,7 @@ class ForecasterBase(ABC):
                 target_rows,
             )
         predictions = sanitize_predictions(predictions)
-        predictions = extrapolate_quantiles(quantile_levels, rollout_levels, predictions, self.config.quantile_levels)
-        if batch_shape is not None:
-            predictions = ops_for(predictions).reshape(predictions, (*batch_shape, *predictions.shape[1:]))
-        return Forecast(quantiles=self._materialize(predictions), quantile_levels=tuple(quantile_levels))
+        return extrapolate_quantiles(quantile_levels, rollout_levels, predictions, self.config.quantile_levels)
 
     def _series_from_array(
         self, context: Any, horizon: int, future_covariates: Any, mask: Any, group_ids: Any
@@ -254,3 +305,112 @@ class ForecasterBase(ABC):
         n_targets = context.shape[0] * (context.shape[1] if context.ndim == 3 else 1)
         series = TimeSeries.from_array(context, future, mask=mask_array, group_ids=groups)
         return series, batch_shape, n_targets, context.shape[-1]
+
+
+# Adjustments ``predict`` can apply around the model. They run on the host in float64,
+# use only each series' own history, and follow TimesFM 3's inference-time processing:
+# symmetric averaging, non-negative clipping and leading-missing trimming.
+
+
+def _to_host(x: Any) -> np.ndarray:
+    return np.asarray(ops_for(x).to_device(x, "cpu"))
+
+
+def _replace_values(series: TimeSeries, values: np.ndarray, mask: np.ndarray) -> TimeSeries:
+    ops = ops_for(series.variates)
+    return dataclasses.replace(
+        series,
+        variates=ops.asarray(values.astype(np.float32), device=series.device),
+        mask=ops.asarray(mask, device=series.device),
+    )
+
+
+def _observed_history(series: TimeSeries, context_length: int, target_rows: list[int]) -> list[np.ndarray]:
+    """Each target row's observed context values."""
+    values = _to_host(series.variates)[:, :context_length]
+    mask = _to_host(series.mask)[:, :context_length]
+    return [values[row][(mask[row] == MaskType.VALID) & np.isfinite(values[row])] for row in target_rows]
+
+
+def _trim_leading_missing(series: TimeSeries, context_length: int) -> TimeSeries:
+    """Mark every row of a series PAD before its targets' first observation."""
+    values = _to_host(series.variates).astype(np.float64)
+    mask = _to_host(series.mask).copy()
+    groups = _to_host(series.group_ids)[:, -1]
+    targets = _to_host(series.variate_type)[:, -1] == VariateType.TARGET
+    observed = (mask == MaskType.VALID) & np.isfinite(values)
+    observed[:, context_length:] = False
+    for group in np.unique(groups):
+        rows = groups == group
+        seen = observed[rows & targets].any(axis=0)
+        if seen.any():
+            lead = rows[:, None] & (np.arange(series.seq_len) < int(np.argmax(seen)))[None, :]
+            cells = lead & (mask != MaskType.PAD)
+            mask[cells] = MaskType.PAD
+            values[cells] = 0.0
+    return _replace_values(series, values, mask)
+
+
+def _negated(series: TimeSeries) -> TimeSeries:
+    """Every row negated, its gaps after the first observation linearly interpolated.
+
+    A gap past a row's last observation takes that last value; filled cells become
+    observations of the negated copy.
+    """
+    values = _to_host(series.variates).astype(np.float64)
+    mask = _to_host(series.mask).copy()
+    for row in range(values.shape[0]):
+        seen = np.flatnonzero((mask[row] == MaskType.VALID) & np.isfinite(values[row]))
+        if seen.size == 0:
+            continue
+        gaps = np.flatnonzero(mask[row] == MaskType.MISSING)
+        gaps = gaps[gaps > seen[0]]
+        if gaps.size:
+            values[row, gaps] = np.interp(gaps, seen, values[row, seen])
+            mask[row, gaps] = MaskType.VALID
+    values = np.where(mask != MaskType.PAD, -np.nan_to_num(values), 0.0)
+    return _replace_values(series, values, mask)
+
+
+def _with_mirrors(levels: tuple[float, ...]) -> tuple[float, ...]:
+    """``levels`` plus each level's mirror ``1 - q``, ascending."""
+    closed = list(levels)
+    for level in levels:
+        if not any(math.isclose(1.0 - level, other, abs_tol=1e-9) for other in closed):
+            closed.append(1.0 - level)
+    return tuple(sorted(closed))
+
+
+def _level_index(levels: tuple[float, ...], level: float) -> int:
+    return next(i for i, other in enumerate(levels) if math.isclose(level, other, abs_tol=1e-9))
+
+
+def _averaged_rows(history: list[np.ndarray]) -> np.ndarray:
+    """Which target rows symmetric averaging changes: those with history not floored at zero."""
+    return np.array([seen.size > 0 and seen.min() != 0 for seen in history])
+
+
+def _symmetric_average(
+    positive: np.ndarray,
+    negated: np.ndarray,
+    levels: tuple[float, ...],
+    requested: tuple[float, ...],
+    history: list[np.ndarray],
+) -> np.ndarray:
+    """``(f(x)_q - f(-x)_{1-q}) / 2`` at the requested levels; rows floored at zero keep ``f(x)``."""
+    mirror = [_level_index(levels, 1.0 - level) for level in levels]
+    averaged = (positive - negated[..., mirror]) / 2
+    combined = np.where(_averaged_rows(history)[:, None, None], averaged, positive)
+    return combined[..., [_level_index(levels, level) for level in requested]]
+
+
+def _bound_to_history(values: np.ndarray, history: list[np.ndarray], clip: bool, snap: bool) -> np.ndarray:
+    """Clip rows with a non-negative history at zero and round rows with an integer one."""
+    for row, seen in enumerate(history):
+        if not seen.size:
+            continue
+        if clip and seen.min() >= 0:
+            values[row] = np.maximum(values[row], 0.0)
+        if snap and np.array_equal(seen, np.round(seen)):
+            values[row] = np.round(values[row])
+    return values

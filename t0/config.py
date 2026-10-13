@@ -20,6 +20,11 @@ else:
 # adds eps to the variance before the square root, "std_clamp" lower-bounds the
 # square root at eps. A checkpoint is only valid under the one it trained with.
 ScalerEpsMode = Literal["variance_offset", "std_clamp"]
+# Which rotary coordinates share an xPos scale: "interleaved" pairs adjacent
+# dimensions (2i, 2i+1), as the rotation does; "halves" repeats the per-pair
+# scales over the two halves of the head dimension. A checkpoint is only valid
+# under the one it trained with.
+XposScaleLayout = Literal["interleaved", "halves"]
 
 
 @dataclass(frozen=True)
@@ -58,6 +63,12 @@ class T0Config:
             agree wherever a series' local standard deviation sits well above
             ``eps`` and diverge below it. The global (known-future) statistic
             always clamps.
+        xpos_scale_layout: How the xPos scales line up with the rotary
+            coordinates (see ``XposScaleLayout``).
+        scaler_zero_no_value: Whether cells without an observation (padding,
+            missing or forecast) enter the model as zero after scaling. When
+            unset they enter as the scaled value of zero, the convention of
+            checkpoints trained before the two were told apart.
     """
 
     embed_dim: int
@@ -73,6 +84,8 @@ class T0Config:
     # fields — from_pretrained on it must stay bit-identical.
     scaler_eps: float = 0.1
     scaler_eps_mode: ScalerEpsMode = "variance_offset"
+    xpos_scale_layout: XposScaleLayout = "interleaved"
+    scaler_zero_no_value: bool = True
 
     def __post_init__(self) -> None:
         positive = {
@@ -101,6 +114,8 @@ class T0Config:
             raise ValueError(f"scaler_eps must be positive, got {self.scaler_eps}")
         if self.scaler_eps_mode not in ("variance_offset", "std_clamp"):
             raise ValueError(f"scaler_eps_mode must be 'variance_offset' or 'std_clamp', got {self.scaler_eps_mode!r}")
+        if self.xpos_scale_layout not in ("interleaved", "halves"):
+            raise ValueError(f"xpos_scale_layout must be 'interleaved' or 'halves', got {self.xpos_scale_layout!r}")
 
     @classmethod
     def from_dict(cls, values: dict[str, Any]) -> Self:

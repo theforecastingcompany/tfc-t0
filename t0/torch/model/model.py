@@ -22,7 +22,7 @@ from huggingface_hub import PyTorchModelHubMixin
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from t0.config import ScalerEpsMode, T0Config
+from t0.config import ScalerEpsMode, T0Config, XposScaleLayout
 from t0.data import TimeSeries
 from t0.forecast import Forecast
 from t0.forecaster import DEFAULT_MAX_HORIZON, ForecasterBase
@@ -66,6 +66,8 @@ class T0Forecaster(
         scaler_use_arcsinh: bool = True,
         scaler_eps: float = 0.1,
         scaler_eps_mode: ScalerEpsMode = "variance_offset",
+        xpos_scale_layout: XposScaleLayout = "interleaved",
+        scaler_zero_no_value: bool = True,
         # Forwarded by huggingface_hub 1.x's from_pretrained (renamed from
         # torch_dtype). bf16/fp16 keep fp32 weights and autocast the forward
         # in predict(); other dtypes run in fp32 with no autocast.
@@ -87,6 +89,8 @@ class T0Forecaster(
                 scaler_use_arcsinh=scaler_use_arcsinh,
                 scaler_eps=scaler_eps,
                 scaler_eps_mode=scaler_eps_mode,
+                xpos_scale_layout=xpos_scale_layout,
+                scaler_zero_no_value=scaler_zero_no_value,
             )
         )
         self.head = QuantileHead(quantile_levels=list(quantile_levels))
@@ -102,6 +106,7 @@ class T0Forecaster(
             mlp_hidden_dim=mlp_hidden_dim,
             dropout=dropout,
             group_every_n=group_every_n,
+            xpos_scale_layout=xpos_scale_layout,
         )
         self.decoder = ResidualBlock(
             input_size=embed_dim,
@@ -125,6 +130,10 @@ class T0Forecaster(
         quantile_levels: Sequence[float] = ...,
         *,
         context_length: int | None = ...,
+        trim_leading_missing: bool = ...,
+        symmetric_averaging: bool = ...,
+        clip_nonnegative: bool = ...,
+        snap_integers: bool = ...,
     ) -> Forecast[Tensor]: ...
 
     @overload
@@ -142,6 +151,10 @@ class T0Forecaster(
         | None = ...,
         mask: Int[Tensor, "*batch time"] | Int[np.ndarray, "*batch time"] | None = ...,
         group_ids: Int[Tensor, " rows"] | Int[np.ndarray, " rows"] | None = ...,
+        trim_leading_missing: bool = ...,
+        symmetric_averaging: bool = ...,
+        clip_nonnegative: bool = ...,
+        snap_integers: bool = ...,
     ) -> Forecast[Tensor]: ...
 
     @torch.inference_mode()
@@ -155,6 +168,10 @@ class T0Forecaster(
         future_covariates: Any = None,
         mask: Any = None,
         group_ids: Any = None,
+        trim_leading_missing: bool = False,
+        symmetric_averaging: bool = False,
+        clip_nonnegative: bool = False,
+        snap_integers: bool = False,
     ) -> Forecast[Tensor]:
         return super().predict(
             model_input,
@@ -164,6 +181,10 @@ class T0Forecaster(
             future_covariates=future_covariates,
             mask=mask,
             group_ids=group_ids,
+            trim_leading_missing=trim_leading_missing,
+            symmetric_averaging=symmetric_averaging,
+            clip_nonnegative=clip_nonnegative,
+            snap_integers=snap_integers,
         )
 
     predict.__doc__ = ForecasterBase.predict.__doc__

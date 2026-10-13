@@ -16,6 +16,7 @@ from collections.abc import Callable, Sequence
 import mlx.core as mx
 import mlx.nn as nn
 
+from t0.config import XposScaleLayout
 from t0.mask import build_attention_masks, reduce_patch_metadata
 
 
@@ -132,10 +133,17 @@ def _rotate_half(x: mx.array) -> mx.array:
 class TimeAwareRotaryEmbedding:
     """The checkpoint's temporal RoPE with XPos query/key scaling."""
 
-    def __init__(self, dims: int, theta: float = 10_000.0, scale_base: float = 512.0):
+    def __init__(
+        self,
+        dims: int,
+        theta: float = 10_000.0,
+        scale_base: float = 512.0,
+        xpos_scale_layout: XposScaleLayout = "interleaved",
+    ):
         self.dims = dims
         self.theta = theta
         self.scale_base = scale_base
+        self.xpos_scale_layout = xpos_scale_layout
 
     def rotate_queries_and_keys(self, queries: mx.array, keys: mx.array) -> tuple[mx.array, mx.array]:
         seq_len = queries.shape[-2]
@@ -149,7 +157,14 @@ class TimeAwareRotaryEmbedding:
         center = mx.floor(mx.max(positions) / 2.0)
         power = (positions - center) / self.scale_base
         half_scale = scale_frequencies[None, :] ** power[:, None]
-        scale = mx.repeat(half_scale, 2, axis=-1).astype(queries.dtype)
+        match self.xpos_scale_layout:
+            case "interleaved":
+                scale = mx.repeat(half_scale, 2, axis=-1)
+            case "halves":
+                scale = mx.concatenate([half_scale, half_scale], axis=-1)
+            case layout:
+                raise ValueError(f"unknown xpos_scale_layout {layout!r}")
+        scale = scale.astype(queries.dtype)
 
         rotated_queries = (queries * cosine + _rotate_half(queries) * sine) * scale
         rotated_keys = (keys * cosine + _rotate_half(keys) * sine) / scale
@@ -261,9 +276,10 @@ class Transformer(nn.Module):
         mlp_hidden_dim: int,
         dropout: float,
         group_every_n: int,
+        xpos_scale_layout: XposScaleLayout = "interleaved",
     ):
         super().__init__()
-        rotary = TimeAwareRotaryEmbedding(embed_dim // num_heads)
+        rotary = TimeAwareRotaryEmbedding(embed_dim // num_heads, xpos_scale_layout=xpos_scale_layout)
         self.layers = [
             TransformerLayer(
                 embed_dim,

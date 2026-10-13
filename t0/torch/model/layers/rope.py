@@ -10,6 +10,8 @@ from einops import rearrange
 from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
 from rotary_embedding_torch.rotary_embedding_torch import default
 
+from t0.config import XposScaleLayout
+
 
 def exists(val):
     return val is not None
@@ -23,8 +25,9 @@ class TimeAwareRotaryEmbedding(RotaryEmbedding):
     information.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, xpos_scale_layout: XposScaleLayout = "interleaved", **kwargs):
         super().__init__(*args, **kwargs)
+        self.xpos_scale_layout = xpos_scale_layout
         # If the parent stored `freqs` as a Parameter, remove it and register as a buffer
         # Register buffer is needed for sharding with FSDP
         if hasattr(self, "freqs") and isinstance(self.freqs, torch.nn.Parameter):
@@ -95,6 +98,12 @@ class TimeAwareRotaryEmbedding(RotaryEmbedding):
         power = (t - t.max(-1).values.unsqueeze(-1) // 2) / self.scale_base
 
         scale = self.scale ** rearrange(power, "... n -> ... n 1")
-        scale = scale.repeat_interleave(2, dim=-1)
+        match self.xpos_scale_layout:
+            case "interleaved":
+                scale = scale.repeat_interleave(2, dim=-1)
+            case "halves":
+                scale = torch.cat((scale, scale), dim=-1)
+            case layout:
+                raise ValueError(f"unknown xpos_scale_layout {layout!r}")
 
         return scale

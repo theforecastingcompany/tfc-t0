@@ -35,7 +35,11 @@ Step = Callable[[TimeSeries, int], object]
 def prepare_rollout_buffer(
     series: TimeSeries[ArrayT], prediction_length: int, context_length: int, patch_size: int
 ) -> TimeSeries[ArrayT]:
-    """Build the rollout buffer: padded context + a forecast region (targets WITHHELD, known futures VALID)."""
+    """Build the rollout buffer: padded context + a forecast region.
+
+    Over the forecast region, target and historical-covariate rows are ``WITHHELD``, as the
+    model saw them in training, and known future covariates keep their values.
+    """
     ops = ops_for(series.variates)
     device = ops.device(series.variates)
     rows = series.variates.shape[0]
@@ -45,10 +49,13 @@ def prepare_rollout_buffer(
 
     row_type = series.variate_type[:, -1:]
     row_group = series.group_ids[:, -1:]
-    is_target, is_future = row_type == VariateType.TARGET, row_type == VariateType.FUTURE
+    is_future = row_type == VariateType.FUTURE
+    # A historical row is unknown over the forecast region, exactly like a target: withheld,
+    # not padding (an all-PAD patch would drop the row out of attention there).
+    is_withheld = (row_type == VariateType.TARGET) | (row_type == VariateType.HISTORICAL)
     forecast_values = ops.full((rows, forecast_width), 0, dtype=series.variates.dtype, device=device)
     forecast_mask = ops.where(
-        ops.broadcast_to(is_target, (rows, forecast_width)),
+        ops.broadcast_to(is_withheld, (rows, forecast_width)),
         ops.full((rows, forecast_width), MaskType.WITHHELD, dtype=ops.int8, device=device),
         ops.full((rows, forecast_width), MaskType.PAD, dtype=ops.int8, device=device),
     )

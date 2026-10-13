@@ -15,6 +15,7 @@ import torch.nn as nn
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
+from t0.config import XposScaleLayout
 from t0.mask import build_attention_masks
 from t0.torch.model.layers.feed_forward import SwiGLU
 from t0.torch.model.layers.group_attention import VariateSelfAttentionBlock
@@ -102,6 +103,7 @@ class Transformer(nn.Module):
         mlp_hidden_dim: int,
         dropout: float,
         group_every_n: int = 2,
+        xpos_scale_layout: XposScaleLayout = "interleaved",
     ):
         super().__init__()
         if embed_dim % num_heads != 0:
@@ -118,6 +120,7 @@ class Transformer(nn.Module):
             use_xpos=True,
             cache_if_possible=True,
             seq_before_head_dim=False,
+            xpos_scale_layout=xpos_scale_layout,
         )
 
         layer_types = self._get_layer_types(num_layers, group_every_n)

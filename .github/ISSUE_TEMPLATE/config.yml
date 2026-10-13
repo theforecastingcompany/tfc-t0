@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://www.theforecastingcompany.com/contact
+    about: Email support@theforecastingcompany.com. Never open a public issue for a vulnerability.
+  - name: Retrocast, the hosted API or the MCP
+    url: https://www.theforecastingcompany.com/contact
+    about: This repository covers the open-weights model only. Email support@theforecastingcompany.com for our products.
