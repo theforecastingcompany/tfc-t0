@@ -1,0 +1,71 @@
+name: Issue
+description: Report a bug, a forecast that looks wrong, or ask for a feature.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to open an issue! Please [search existing issues](https://github.com/theforecastingcompany/tfc-t0/issues?q=is%3Aissue) first. The short answers below are usually enough for us to reply in one go.
+
+        Security problem? Don't open an issue: email [support@theforecastingcompany.com](mailto:support@theforecastingcompany.com).
+
+  - type: input
+    id: version
+    attributes:
+      label: tfc-t0 version
+      description: |
+        Run `pip show tfc-t0` (or `uv pip show tfc-t0`) and paste the `Version:` line.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: model
+    attributes:
+      label: Which model did you run?
+      description: The checkpoint you load, e.g. `T0Forecaster.from_pretrained("theforecastingcompany/t0-gamma")`.
+      options:
+        - t0-gamma
+        - t0-beta
+        - t0-alpha
+        - t0-alpha-onnx-int8
+        - t0-alpha-onnx-fp16
+        - Other (say which below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime
+      options:
+        - PyTorch on CPU
+        - PyTorch on GPU (CUDA)
+        - PyTorch on Apple silicon (MPS)
+        - MLX
+        - ONNX
+        - Through another library (sktime, skforecast, darts, ...)
+    validations:
+      required: true
+
+  - type: textarea
+    id: script
+    attributes:
+      label: Script
+      description: |
+        The smallest script we can run to see the problem, or a sketch of what you'd like for a feature. Synthetic data is fine (e.g. `np.random.randn(512)`); otherwise tell us the frequency, length and number of series. Link a gist or notebook if it's long.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+      description: Paste the full error traceback, or attach a plot if the forecast looks wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Anything else? (optional)
+      description: OS, Python and torch versions, or which library you call t0 from and its version.

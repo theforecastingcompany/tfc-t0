@@ -57,14 +57,14 @@ and weather covariates, and backtests the result.
 ## 🚀 Quickstart
 
 ```bash
-pip install "tfc-t0[torch]>=0.5.0"
+pip install "tfc-t0[torch]>=0.6.0"
 ```
 
-`t0-beta` normalizes its inputs differently from `t0-alpha`, and carries the
-convention in `config.json` as `scaler_eps` and `scaler_eps_mode`. Releases
-before 0.5.0 do not read those fields: they load these weights without error
-and run them under `t0-alpha`'s normalization, which silently degrades the
-forecast. Pin the floor.
+`t0-gamma` declares the conventions it was trained under in `config.json`:
+its rotary position-scale layout (`xpos_scale_layout`) and how cells without an
+observation are scaled (`scaler_zero_no_value`). Releases before 0.6.0 do not
+read those fields: they load these weights without error and run them under
+other conventions, which silently degrades the forecast. Pin the floor.
 
 The simplest path is a univariate forecast through `predict`:
 
@@ -72,7 +72,7 @@ The simplest path is a univariate forecast through `predict`:
 import torch
 from t0 import T0Forecaster
 
-model = T0Forecaster.from_pretrained("theforecastingcompany/t0-beta").eval()
+model = T0Forecaster.from_pretrained("theforecastingcompany/t0-gamma").eval()
 
 context = torch.randn(4, 512)  # 4 series, 512 past timesteps
 out = model.predict(context, horizon=64, quantile_levels=[0.1, 0.5, 0.9])
@@ -85,7 +85,30 @@ single-row batch. NaN in the context is read as a missing observation. To
 say that some cells are padding instead, pass a `mask`. See
 [batched inference](#batched-inference).
 
-`t0-alpha` and `t0-beta` are public and download without authentication.
+`t0-alpha`, `t0-beta` and `t0-gamma` are public and download without authentication.
+
+### Recommended inference settings
+
+Four optional `predict` settings produce `t0-gamma`'s published scores. Each
+uses only the series' own history:
+
+- `trim_leading_missing`: ignore missing values before the first observation;
+- `symmetric_averaging`: average the forecast with the mirrored forecast of the negated
+  series (two forward passes; skipped when the history's minimum is exactly zero);
+- `clip_nonnegative`: clip at zero when the history is non-negative;
+- `snap_integers`: round when the history is integer-valued.
+
+```python
+out = model.predict(
+    context,
+    horizon=64,
+    quantile_levels=[0.1, 0.5, 0.9],
+    trim_leading_missing=True,
+    symmetric_averaging=True,
+    clip_nonnegative=True,
+    snap_integers=True,
+)
+```
 
 ### Forecasting with covariates
 
@@ -100,7 +123,7 @@ forecast it.
 import torch
 from t0 import T0Forecaster
 
-model = T0Forecaster.from_pretrained("theforecastingcompany/t0-beta").eval()
+model = T0Forecaster.from_pretrained("theforecastingcompany/t0-gamma").eval()
 
 context = torch.randn(2, 512)                    # 2 series, 512 past timesteps
 future_covariates = torch.randn(2, 3, 512 + 64)  # 3 covariates known over context + horizon
@@ -121,7 +144,7 @@ out.median     # (2, 64)
 import numpy as np
 from t0 import T0Forecaster, batch_series
 
-model = T0Forecaster.from_pretrained("theforecastingcompany/t0-beta").eval()
+model = T0Forecaster.from_pretrained("theforecastingcompany/t0-gamma").eval()
 
 daily = np.random.randn(180)    # one series, 180 past timesteps
 store = np.random.randn(2, 96)  # one series of 2 variates, 96 past timesteps
@@ -192,21 +215,21 @@ is the entry point for fine-tuning.
 
 ## Choose how to run `t0` models
 
-**Model family:** [`t0-beta` (PyTorch/MLX)](https://huggingface.co/theforecastingcompany/t0-beta) · [`t0-alpha`](https://huggingface.co/theforecastingcompany/t0-alpha) · [Collection](https://huggingface.co/collections/theforecastingcompany/t0-model-family)
+**Model family:** [`t0-gamma` (PyTorch/MLX)](https://huggingface.co/theforecastingcompany/t0-gamma) · [`t0-beta`](https://huggingface.co/theforecastingcompany/t0-beta) · [`t0-alpha`](https://huggingface.co/theforecastingcompany/t0-alpha) · [Collection](https://huggingface.co/collections/theforecastingcompany/t0-model-family)
 
 The `tfc-t0` package provides PyTorch and MLX runtimes as separate extras.
 ONNX artifacts and our managed API cover other deployment targets:
 
 | Use case | Install or open |
 | --- | --- |
-| Local inference with PyTorch | `pip install "tfc-t0[torch]>=0.5.0"` |
+| Local inference with PyTorch | `pip install "tfc-t0[torch]>=0.6.0"` |
 | Local inference on Apple silicon with MLX | `pip install "tfc-t0[mlx]>=0.6.0"` |
 | Accelerator-oriented local and edge inference with ONNX FP16 | [`t0-alpha-onnx-fp16`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) |
 | CPU and in-browser inference with ONNX INT8 | [`t0-alpha-onnx-int8`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) |
-| Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com) |
+| Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com/documentation#available-models) |
 
-The ONNX artifacts are built from `t0-alpha`; there is no `t0-beta` ONNX
-export yet.
+The ONNX artifacts are built from `t0-alpha`; there is no `t0-beta` or
+`t0-gamma` ONNX export yet.
 
 You can also use `t0` on [Retrocast](https://app.retrocast.com/) to forecast on your own data and compare open-weight models.
 
@@ -245,16 +268,16 @@ to 1024 timesteps in one forward pass — and falls back on autoregressive
 rollout for longer horizons. Quantile levels between the trained ones are
 interpolated, and levels beyond them extrapolated on exponential tails.
 
-|                 | `t0-beta`                    | `t0-alpha`                |
-| --------------- | ---------------------------- | ------------------------- |
-| Parameters      | ~256M                        | ~102M                     |
-| Layers          | 24                           | 24                        |
-| Embedding dim   | 1024                         | 512                       |
-| Feedforward dim | 2048                         | 2048                      |
-| Attention heads | 8                            | 8                         |
-| Patch size      | 32                           | 32                        |
-| Quantile levels | 21, from 0.01 to 0.99        | 0.1, 0.25, 0.5, 0.75, 0.9 |
-| `T0Config`      | `T0Config.large()`           | `T0Config.medium()`       |
+|                 | `t0-gamma`                   | `t0-beta`                    | `t0-alpha`                |
+| --------------- | ---------------------------- | ---------------------------- | ------------------------- |
+| Parameters      | ~256M                        | ~256M                        | ~102M                     |
+| Layers          | 24                           | 24                           | 24                        |
+| Embedding dim   | 1024                         | 1024                         | 512                       |
+| Feedforward dim | 2048                         | 2048                         | 2048                      |
+| Attention heads | 8                            | 8                            | 8                         |
+| Patch size      | 32                           | 32                           | 32                        |
+| Quantile levels | 21, from 0.01 to 0.99        | 21, from 0.01 to 0.99        | 0.1, 0.25, 0.5, 0.75, 0.9 |
+| `T0Config`      | from its `config.json`       | `T0Config.large()`           | `T0Config.medium()`       |
 
 ### 🧬 Lineage
 

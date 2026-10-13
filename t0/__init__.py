@@ -13,7 +13,15 @@ from t0.config import T0Config
 if TYPE_CHECKING:
     from t0.torch import Forecast, MaskType, T0Forecaster, TimeSeries, VariateType, batch_series
 
-__all__ = ["Forecast", "MaskType", "T0Config", "T0Forecaster", "TimeSeries", "VariateType", "batch_series"]
+__all__ = [
+    "Forecast",
+    "MaskType",
+    "T0Config",
+    "T0Forecaster",
+    "TimeSeries",
+    "VariateType",
+    "batch_series",
+]
 
 # Served by the PyTorch runtime, imported on first access so `import t0` stays framework-free.
 _TORCH_EXPORTS = frozenset({"Forecast", "MaskType", "T0Forecaster", "TimeSeries", "VariateType", "batch_series"})

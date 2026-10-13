@@ -4,48 +4,54 @@ All notable changes to `tfc-t0` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-10-13
+
+Adds support for `t0-gamma`.
 
 ### Changed
 
-- **Breaking.** `tfc-t0` is now one package with two runtimes, one for mlx and
-  one for torch: install `pip install "tfc-t0[torch]"` or
-  `pip install "tfc-t0[mlx]"` (a bare `pip install tfc-t0` installs neither),
-  and `t0_mlx` becomes `t0.mlx`, superseding the `tfc-t0-mlx` distribution.
-  The code both runtimes share has been factorized into framework-free modules
-  of `t0`, and the PyTorch model moved from `t0.model` to `t0.torch.model`;
-  `from t0 import T0Forecaster` still returns the PyTorch runtime. The MLX
-  runtime now runs the PyTorch runtime's `predict`, with its arguments and its
-  float32 quantile interpolation.
+- **Breaking.** `tfc-t0` is now one package with two runtimes, installed with
+  `pip install "tfc-t0[torch]"` or `pip install "tfc-t0[mlx]"`. The MLX
+  runtime moves from `t0_mlx` to `t0.mlx`, and the PyTorch model from
+  `t0.model` to `t0.torch.model`.
+- The MLX runtime now runs the same `predict` as the PyTorch runtime, with the
+  same arguments and results.
 
 ### Added
 
-- The MLX runtime accepts a `TimeSeries` as input, including typed rows
-  (historical and known-future covariates in shared groups) in any order,
-  and gains `TimeSeries.batch`.
+- New inference parameters on `predict` that improve forecasts, using only
+  each series' own history. They are off by default in `predict` and on by
+  default in `T0Predictor`:
+  - `trim_leading_missing` ignores the missing values before a series' first
+    observation.
+  - `symmetric_averaging` also forecasts the negated series and averages the two
+    forecasts. It doubles the compute and skips series whose minimum is zero.
+  - `clip_nonnegative` keeps forecasts at or above zero when the history is
+    never negative.
+  - `snap_integers` rounds forecasts when the history holds only integers.
+- Support for `t0-gamma`, the third public model. It needs this release to
+  run correctly, since older releases ignore the conventions in its `config.json`.
+- `cross_inference` on `T0Predictor` forecasts several series of the same
+  window together, so the model can compare them. It is how `t0-gamma`'s
+  GIFT-Eval scores are measured.
+- `xpos_scale_layout` and `scaler_zero_no_value` on `T0Config`. They let a
+  checkpoint's `config.json` state two numerical conventions it was trained
+  with, and the defaults keep the current behaviour.
+- The MLX runtime accepts a `TimeSeries` as input, with covariate rows in any
+  order, and gains `TimeSeries.batch`.
 - A [notebook](https://github.com/theforecastingcompany/tfc-t0/blob/main/notebooks/03_electricity_day_ahead_prices.ipynb)
-  showcasing `t0` on European electricity spot prices.
+  forecasting European electricity spot prices.
 - A link to the `t0` paper on [arXiv](https://arxiv.org/abs/2609.24559).
 
 ### Fixed
 
-- Variate attention now matches training when known-future covariates are
-  present: a future-covariate row reads only future-covariate rows, so
-  information flows from covariates into targets and never back. The
-  released checkpoints were trained under this rule, but the runtime let
-  future covariates read the target and historical rows through an attention
-  edge that never received gradient. Forecasts without future covariates are
-  bit-identical; forecasts with them change, by a few percent of the series
-  scale with one to four covariates and more with many.
-  The group mask now depends on each patch's variate type
-  (`t0.mask.build_attention_masks`). Both runtimes carry the fix.
-- A patch now takes its variate type from its first non-padding time step,
-  as in training. When a context length is not a multiple of the patch size
-  the runtime left-pads the first patch, and that patch on a covariate row
-  was embedded as a target. Forecasts change only for covariate rows with
-  such a partial first patch: `t0-alpha` and `t0-beta` learned the old rule
-  and move slightly there; later checkpoints expect the new one. Both
-  runtimes carry the fix.
+- Historical covariates are now handled over the forecast horizon as in
+  training. Forecasts that use them over a horizon longer than 32 steps change.
+- Known-future covariates no longer attend to the target and historical rows,
+  as in training. Forecasts that use them change by a few percent.
+- A covariate's first patch is no longer mistaken for a target when the
+  context length is not a multiple of 32. Forecasts change slightly for those
+  covariate rows only.
 
 ## [0.5.0] - 2026-09-17
 

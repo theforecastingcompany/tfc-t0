@@ -86,16 +86,26 @@ class CausalScaler:
     array values, so it traces into compiled graphs.
     """
 
-    def __init__(self, use_arcsinh: bool = False, eps: float = EPS, eps_mode: ScalerEpsMode = "variance_offset"):
+    def __init__(
+        self,
+        use_arcsinh: bool = False,
+        eps: float = EPS,
+        eps_mode: ScalerEpsMode = "variance_offset",
+        zero_no_value: bool = True,
+    ):
         self.use_arcsinh = use_arcsinh
         self.eps = eps
         self.eps_mode = eps_mode
+        self.zero_no_value = zero_no_value
 
     def scale_input(self, series: Any) -> tuple[Any, LocScale]:
         """Standardize a ``TimeSeries``; returns the scaled series and the statistics used."""
         x = series.variates
         ops = ops_for(x)
         invalid = (series.mask != MaskType.VALID) | ops.isnan(x)
+        if not self.zero_no_value:
+            # A cell without an observation carries zero into the scaling below.
+            x = ops.where(ops.isnan(x), ops.zeros_like(x), x)
         causal_loc, causal_scale = compute_causal_stats(x, invalid, self.eps, self.eps_mode)
         future_loc, future_scale = compute_global_stats(x, invalid, self.eps)
         real = series.group_ids >= 0
@@ -110,10 +120,11 @@ class CausalScaler:
             scaled = ops.asinh(scaled)
         # Cells that hold no observation read as zero, whatever placeholder they carried;
         # censored cells keep their (scaled) bound.
-        no_value = (
-            (series.mask == MaskType.PAD) | (series.mask == MaskType.MISSING) | (series.mask == MaskType.WITHHELD)
-        )
-        scaled = ops.where(no_value, ops.zeros_like(scaled), scaled)
+        if self.zero_no_value:
+            no_value = (
+                (series.mask == MaskType.PAD) | (series.mask == MaskType.MISSING) | (series.mask == MaskType.WITHHELD)
+            )
+            scaled = ops.where(no_value, ops.zeros_like(scaled), scaled)
         return dataclasses.replace(series, variates=scaled), LocScale(loc=loc, scale=scale)
 
     def rescale_predictions(

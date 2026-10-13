@@ -10,6 +10,7 @@ Requires the ``evaluation`` extra: ``pip install "tfc-t0[evaluation]"``.
 
 import logging
 from collections.abc import Iterable, Sequence
+from typing import TypedDict
 
 import numpy as np
 import torch
@@ -20,9 +21,19 @@ try:
 except ImportError as err:  # pragma: no cover - exercised only without the extra
     raise ImportError('t0.evaluation requires the evaluation extra: pip install "tfc-t0[evaluation]"') from err
 
+from t0.torch import batch_series
 from t0.torch.model import T0Forecaster
 
 logger = logging.getLogger(__name__)
+
+
+class InferenceKwargs(TypedDict):
+    """The inference adjustments ``T0Predictor`` passes to every ``predict`` call."""
+
+    trim_leading_missing: bool
+    symmetric_averaging: bool
+    clip_nonnegative: bool
+    snap_integers: bool
 
 
 class T0Predictor:
@@ -39,6 +50,12 @@ class T0Predictor:
         batch_size: Entries per forward pass.
         show_progress: Display a progress bar over the entries while
             predicting.
+        trim_leading_missing, symmetric_averaging, clip_nonnegative, snap_integers: Passed to
+            every ``predict`` call (see ``T0Forecaster.predict``). On by default, the
+            settings of the published benchmark scores.
+        cross_inference: Forecast up to this many series of one test window together,
+            as the variates of one group, so the model reads across them. ``0`` forecasts
+            each series on its own. Two windows of the same item are never grouped.
     """
 
     def __init__(
@@ -50,6 +67,11 @@ class T0Predictor:
         context_length: int | None = None,
         batch_size: int = 64,
         show_progress: bool = False,
+        trim_leading_missing: bool = True,
+        symmetric_averaging: bool = True,
+        clip_nonnegative: bool = True,
+        snap_integers: bool = True,
+        cross_inference: int = 0,
     ):
         self.model = model
         self.prediction_length = prediction_length
@@ -59,6 +81,13 @@ class T0Predictor:
         self.context_length = context_length
         self.batch_size = batch_size
         self.show_progress = show_progress
+        self.inference_kwargs: InferenceKwargs = {
+            "trim_leading_missing": trim_leading_missing,
+            "symmetric_averaging": symmetric_averaging,
+            "clip_nonnegative": clip_nonnegative,
+            "snap_integers": snap_integers,
+        }
+        self.cross_inference = cross_inference
 
     def predict(self, test_data_input: Iterable[dict]) -> list[QuantileForecast]:
         """Forecast every entry, batching for efficiency.
@@ -68,6 +97,8 @@ class T0Predictor:
         out-of-memory error halves the batch size and retries.
         """
         entries = list(test_data_input)
+        if self.cross_inference > 1:
+            return self._predict_grouped(entries)
         batch_size = self.batch_size
         forecasts: list[QuantileForecast] = []
         with tqdm(
@@ -115,17 +146,68 @@ class T0Predictor:
         for i, c in enumerate(contexts):
             by_length.setdefault(len(c), []).append(i)
 
-        quantiles = np.empty((len(batch), self.prediction_length, len(self.quantile_levels)), dtype=np.float32)
+        quantiles = self._empty_quantiles(len(batch))
         for indices in by_length.values():
             out = self.model.predict(
                 np.stack([contexts[i] for i in indices]),
                 horizon=self.prediction_length,
                 quantile_levels=self.quantile_levels,
+                **self.inference_kwargs,
             )
             quantiles[indices] = out.quantiles.cpu().numpy()
 
+        return self._forecasts(batch, quantiles)
+
+    def _predict_grouped(self, entries: list[dict]) -> list[QuantileForecast]:
+        """Forecast up to ``cross_inference`` series of one window together."""
+        contexts = self._contexts_from_entries(entries)
+        # An entry's window is its occurrence count among the entries of the same item.
+        seen: dict[str, int] = {}
+        by_window: dict[int, list[int]] = {}
+        for i, entry in enumerate(entries):
+            item = str(entry.get("item_id"))
+            by_window.setdefault(seen.get(item, 0), []).append(i)
+            seen[item] = seen.get(item, 0) + 1
+        groups = [
+            rows[start : start + self.cross_inference]
+            for _, rows in sorted(by_window.items())
+            for start in range(0, len(rows), self.cross_inference)
+        ]
+        groups_per_call = max(1, self.batch_size // self.cross_inference)
+        device = next(self.model.parameters()).device
+        quantiles = self._empty_quantiles(len(entries))
+        with tqdm(
+            total=len(entries), desc="predict", unit="series", leave=False, disable=not self.show_progress
+        ) as bar:
+            for start in range(0, len(groups), groups_per_call):
+                chunk = groups[start : start + groups_per_call]
+                blocks = []
+                for members in chunk:
+                    width = max(len(contexts[i]) for i in members)
+                    block = np.full((len(members), width), np.nan, dtype=np.float32)
+                    for row, i in enumerate(members):
+                        block[row, width - len(contexts[i]) :] = contexts[i]
+                    blocks.append(block)
+                context, mask, group_ids = batch_series(blocks)
+                out = self.model.predict(
+                    context.to(device),
+                    horizon=self.prediction_length,
+                    quantile_levels=self.quantile_levels,
+                    mask=mask.to(device),
+                    group_ids=group_ids.to(device),
+                    **self.inference_kwargs,
+                )
+                quantiles[[i for members in chunk for i in members]] = out.quantiles.cpu().numpy()
+                bar.update(sum(len(members) for members in chunk))
+        return self._forecasts(entries, quantiles)
+
+    def _empty_quantiles(self, n: int) -> np.ndarray:
+        return np.empty((n, self.prediction_length, len(self.quantile_levels)), dtype=np.float32)
+
+    def _forecasts(self, entries: list[dict], quantiles: np.ndarray) -> list[QuantileForecast]:
+        """One ``QuantileForecast`` per entry from ``[entries, horizon, Q]`` quantiles."""
         forecasts = []
-        for i, entry in enumerate(batch):
+        for i, entry in enumerate(entries):
             item_id = entry.get("item_id")
             forecasts.append(
                 QuantileForecast(
