@@ -20,6 +20,7 @@ import torch
 
 from t0 import TimeSeries
 from t0.torch.model import T0Forecaster
+from t0.types import MaskType, VariateType
 
 CONTEXTS = (1, 32, 97, 512, 8192)
 HORIZONS = (32, 64, 1024)
@@ -61,9 +62,10 @@ def reference(model: T0Forecaster, feeds: dict[str, np.ndarray]) -> np.ndarray:
     values = torch.cat([torch.cat([targets, torch.full((targets.shape[0], horizon), torch.nan)], dim=1), covariates])
     groups = np.concatenate([feeds["target_group_ids"], feeds["future_covariate_group_ids"]])
     target_rows = len(feeds["target_group_ids"])
-    variate_type = torch.tensor([0] * target_rows + [2] * (len(groups) - target_rows))[:, None].expand_as(values)
-    mask = torch.isnan(values).to(torch.int8) * 2
-    mask[:target_rows, targets.shape[1] :] = 4
+    roles = [VariateType.TARGET] * target_rows + [VariateType.FUTURE] * (len(groups) - target_rows)
+    variate_type = torch.tensor(roles)[:, None].expand_as(values)
+    mask = torch.where(torch.isnan(values), MaskType.MISSING, MaskType.VALID).to(torch.int8)
+    mask[:target_rows, targets.shape[1] :] = MaskType.WITHHELD
     series = TimeSeries(
         variates=torch.nan_to_num(values),
         mask=mask,

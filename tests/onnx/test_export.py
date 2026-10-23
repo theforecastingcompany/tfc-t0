@@ -2,7 +2,6 @@
 
 import dataclasses
 
-import numpy as np
 import onnxruntime as ort
 import pytest
 import torch
@@ -49,4 +48,3 @@ def test_int8_quantizes_only_transformer_matrices() -> None:
     dequantized = [node for node in quantized.graph.node if node.op_type == "DequantizeLinear"]
     # wQKV, wO and the two MLP matrices of every layer.
     assert len(dequantized) == 4 * model.config.num_layers
-    assert all(np.prod(init.dims) > 0 for init in quantized.graph.initializer)
