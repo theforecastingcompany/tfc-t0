@@ -106,9 +106,10 @@ dev = [
     "ty>=0.0.17",
     { include-group = "onnx" },
 ]
-# The ONNX export, quantization and validation experiments under experiments/onnx/
-# (and their tests). Floors follow experiments/onnx/requirements-portable.txt;
-# onnxruntime 1.29 needs Python 3.11, so on 3.10 the group installs nothing.
+# The ONNX export, quantization and validation experiments under experiments/onnx/,
+# tools/export_onnx.py and tools/validate_onnx.py (and their tests). Floors follow
+# experiments/onnx/requirements-portable.txt; onnxruntime 1.29 needs Python 3.11, so on
+# 3.10 the group installs nothing.
 onnx = [
     "tfc-t0[torch]",
     "onnx>=1.22 ; python_version >= '3.11'",
