@@ -224,12 +224,23 @@ ONNX artifacts and our managed API cover other deployment targets:
 | --- | --- |
 | Local inference with PyTorch | `pip install "tfc-t0[torch]>=0.6.0"` |
 | Local inference on Apple silicon with MLX | `pip install "tfc-t0[mlx]>=0.6.0"` |
-| Accelerator-oriented local and edge inference with ONNX FP16 | [`t0-alpha-onnx-fp16`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) |
-| CPU and in-browser inference with ONNX INT8 | [`t0-alpha-onnx-int8`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) |
+| Accelerator-oriented local and edge inference with ONNX FP16 | [`t0-beta-onnx-fp16`](https://huggingface.co/theforecastingcompany/t0-beta-onnx-fp16) · [`t0-alpha-onnx-fp16`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-fp16) |
+| CPU and in-browser inference with ONNX INT8 | [`t0-beta-onnx-int8`](https://huggingface.co/theforecastingcompany/t0-beta-onnx-int8) · [`t0-alpha-onnx-int8`](https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8) |
 | Managed inference without local weights | [The Forecasting Company API](https://docs.retrocast.com/documentation#available-models) |
 
-The ONNX artifacts are built from `t0-alpha`; there is no `t0-beta` or
-`t0-gamma` ONNX export yet.
+The ONNX artifacts are built from `t0-beta` and `t0-alpha`. There is no
+published `t0-gamma` ONNX export yet. To build one locally, with the same
+inputs and outputs as the published artifacts, use `tools/export_onnx.py`. Then
+check it against PyTorch with `tools/validate_onnx.py`:
+
+```bash
+uv sync --group onnx
+uv run python tools/export_onnx.py theforecastingcompany/t0-gamma out/ --precision fp32 fp16
+uv run python tools/validate_onnx.py theforecastingcompany/t0-gamma out/*.onnx
+```
+
+The FP32 and FP16 exports of `t0-gamma` pass this check. The INT8 export does
+not pass it yet. See [PARITY.md](PARITY.md#onnx-exports).
 
 You can also use `t0` on [Retrocast](https://app.retrocast.com/) to forecast on your own data and compare open-weight models.
 

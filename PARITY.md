@@ -50,3 +50,49 @@ MLX_ENABLE_TF32=0 T0_MLX_CHECKPOINT=/path/to/t0-alpha uv run pytest tests/mlx
 The checkpoint itself lives in the
 [`theforecastingcompany/t0-alpha`](https://huggingface.co/theforecastingcompany/t0-alpha)
 repository and is not redistributed here.
+
+## ONNX exports
+
+`tools/export_onnx.py` exports a checkpoint to the grouped ONNX interface of the
+published `t0-*-onnx-*` artifacts. `tools/validate_onnx.py` checks each export
+against `T0Forecaster.predict` in float64, at the native quantile levels. It runs
+75 cases: contexts 1, 32, 97, 512 and 8192, horizons 32, 64 and 1024, and five
+series per case. The series are a dense series, a series with gaps and leading
+missing values, a series at a level of 50,000 that moves by less than 1, and two
+series forecast jointly with a known-future covariate. Drift is the absolute
+error divided by the reference series' range over the horizon and all quantiles.
+An export passes when all outputs are finite, no quantiles cross, the mean drift
+is at most 2% and the point drift is at most 10%.
+
+To repeat the check:
+
+```bash
+uv sync --group onnx
+uv run python tools/export_onnx.py theforecastingcompany/t0-gamma out/
+uv run python tools/validate_onnx.py theforecastingcompany/t0-gamma out/*.onnx
+```
+
+### t0-gamma - 2026-10-23
+
+- Reference package: `tfc-t0` 0.6.0.
+- Hugging Face revision: `e08aee083778f1f32da4974c0a34276776a35c52`.
+- Checkpoint SHA-256:
+  `1603e255629be22ea45518b502f16c55d06821c7090a1a851673e779e9c245a6`.
+- Environment: Linux x86_64 CPU, Python 3.12.3, PyTorch 2.14.1, ONNX 1.23.2,
+  onnxscript 0.7.2, ONNX Runtime 1.31.0 (CPU execution provider). Opset 20.
+
+| Export | Weights | Size | Worst mean drift | Worst point drift | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| `t0-gamma-grouped-fp32.onnx` | FP32 | 1023.0 MB | 0.0001% | 0.0016% | Passed 75 of 75 |
+| `t0-gamma-grouped-fp16.onnx` | FP16 MatMul weights, FP32 compute | 512.4 MB | 0.038% | 0.82% | Passed 75 of 75 |
+| `t0-gamma-grouped-int8.onnx` | INT8 transformer weights, FP32 compute | 269.2 MB | 0.62% | 54.1% | Failed 18 of 75 |
+
+The INT8 export uses per-channel symmetric weights for the 96 transformer
+matrices. All its failures are on point drift, at the 0.99 quantile, on contexts
+of 512 steps or fewer. Most are on the one-step context. When some layers stay
+in FP32, the worst point drift goes down but stays above the gate: 17.5% with
+the first and last layers in FP32, and 14.1% when the down-projection of every
+MLP also stays in FP32. Do not publish the INT8 export until a different
+quantization method passes.
+
+Browser execution (ONNX Runtime Web, WASM and WebGPU) was not checked.
