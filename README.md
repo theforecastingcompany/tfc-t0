@@ -12,7 +12,7 @@
   <a href="https://huggingface.co/collections/theforecastingcompany/t0-model-family"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20HF-Collection-FFD21E" alt="Hugging Face t0 model collection" /></a>
   <a href="https://colab.research.google.com/github/theforecastingcompany/tfc-t0/blob/main/notebooks/01_inference_quickstart.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open inference quickstart in Colab" /></a>
   <a href="https://pypi.org/project/tfc-t0/"><img src="https://img.shields.io/pypi/v/tfc-t0" alt="PyPI" /></a>
-  <a href="https://pypi.org/project/tfc-t0/"><img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+" /></a>
+  <a href="https://pypi.org/project/tfc-t0/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+" /></a>
   <a href="https://github.com/theforecastingcompany/tfc-t0/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/tfc-t0" alt="License" /></a>
 </p>
 
@@ -60,11 +60,8 @@ and weather covariates, and backtests the result.
 pip install "tfc-t0[torch]>=0.6.0"
 ```
 
-`t0-gamma` declares the conventions it was trained under in `config.json`:
-its rotary position-scale layout (`xpos_scale_layout`) and how cells without an
-observation are scaled (`scaler_zero_no_value`). Releases before 0.6.0 do not
-read those fields: they load these weights without error and run them under
-other conventions, which silently degrades the forecast. Pin the floor.
+`t0-gamma` declares conventions in its `config.json` that releases before
+0.6.0 do not read. Pin the floor.
 
 The simplest path is a univariate forecast through `predict`:
 
@@ -89,8 +86,8 @@ say that some cells are padding instead, pass a `mask`. See
 
 ### Recommended inference settings
 
-Four optional `predict` settings produce `t0-gamma`'s published scores. Each
-uses only the series' own history:
+Optional `predict` settings are recommended for `t0-gamma`. Each uses
+only the series' own history:
 
 - `trim_leading_missing`: ignore missing values before the first observation;
 - `symmetric_averaging`: average the forecast with the mirrored forecast of the negated
@@ -137,6 +134,12 @@ out = model.predict(
 out.quantiles  # (2, 64, 3)
 out.median     # (2, 64)
 ```
+
+A future covariate that never changes over a series' context (for example
+opening hours sent as 0 for every past day and filled in only for the
+horizon) gives the model no evidence of its effect, so `predict` ignores it
+for that series: the forecast is the same as without it. Pass
+`drop_constant_covariates=False` to keep such covariates.
 
 ### Batched inference
 
@@ -237,7 +240,7 @@ You can also use `t0` on [Retrocast](https://app.retrocast.com/) to forecast on 
 
 `t0.mlx` is a first-party, inference-only runtime built on
 [MLX](https://github.com/ml-explore/mlx). It needs Apple silicon, macOS 14 or
-newer, and a native arm64 Python 3.10 or newer, and it does not install
+newer, and a native arm64 Python 3.11 or newer, and it does not install
 PyTorch:
 
 ```bash

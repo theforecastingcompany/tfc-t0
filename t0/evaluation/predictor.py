@@ -27,6 +27,11 @@ from t0.torch.model import T0Forecaster
 logger = logging.getLogger(__name__)
 
 
+def _last_timestamp(entry: dict) -> str:
+    """Timestamp of an entry's last observation: ``start`` plus the target length, minus one."""
+    return str(entry["start"] + (len(entry["target"]) - 1))
+
+
 class InferenceKwargs(TypedDict):
     """The inference adjustments ``T0Predictor`` passes to every ``predict`` call."""
 
@@ -42,18 +47,17 @@ class T0Predictor:
     Args:
         model: A loaded ``T0Forecaster`` (already on its target device).
         prediction_length: Forecast horizon in timesteps.
-        quantile_levels: Quantile levels to forecast. Defaults to the
-            levels use for training the model. Other levels are interpolated or, beyond the
-            trained range, extrapolated.
+        quantile_levels: Quantile levels to forecast. Defaults to
+            ``model.config.quantile_levels``. Other levels are interpolated or, beyond the
+            model's range, extrapolated.
         context_length: If set, keep only the most recent ``context_length``
             observations of each series.
         batch_size: Entries per forward pass.
         show_progress: Display a progress bar over the entries while
             predicting.
         trim_leading_missing, symmetric_averaging, clip_nonnegative, snap_integers: Passed to
-            every ``predict`` call (see ``T0Forecaster.predict``). On by default, the
-            settings of the published benchmark scores.
-        cross_inference: Forecast up to this many series of one test window together,
+            every ``predict`` call (see ``T0Forecaster.predict``). On by default.
+        cross_learning: Forecast up to this many series of one test window together,
             as the variates of one group, so the model reads across them. ``0`` forecasts
             each series on its own. Two windows of the same item are never grouped.
     """
@@ -71,7 +75,7 @@ class T0Predictor:
         symmetric_averaging: bool = True,
         clip_nonnegative: bool = True,
         snap_integers: bool = True,
-        cross_inference: int = 0,
+        cross_learning: int = 0,
     ):
         self.model = model
         self.prediction_length = prediction_length
@@ -87,7 +91,7 @@ class T0Predictor:
             "clip_nonnegative": clip_nonnegative,
             "snap_integers": snap_integers,
         }
-        self.cross_inference = cross_inference
+        self.cross_learning = cross_learning
 
     def predict(self, test_data_input: Iterable[dict]) -> list[QuantileForecast]:
         """Forecast every entry, batching for efficiency.
@@ -97,7 +101,7 @@ class T0Predictor:
         out-of-memory error halves the batch size and retries.
         """
         entries = list(test_data_input)
-        if self.cross_inference > 1:
+        if self.cross_learning > 1:
             return self._predict_grouped(entries)
         batch_size = self.batch_size
         forecasts: list[QuantileForecast] = []
@@ -139,9 +143,7 @@ class T0Predictor:
         contexts = self._contexts_from_entries(batch)
 
         # Bucket by length so each forward runs on equal-length series and no
-        # series is padded up to the batch maximum. The model is sensitive to
-        # left-padding (it shifts the patch grid), so padding short series to a
-        # long one measurably degrades them — bucketing avoids that entirely.
+        # series is padded up to the batch maximum.
         by_length: dict[int, list[int]] = {}
         for i, c in enumerate(contexts):
             by_length.setdefault(len(c), []).append(i)
@@ -159,21 +161,25 @@ class T0Predictor:
         return self._forecasts(batch, quantiles)
 
     def _predict_grouped(self, entries: list[dict]) -> list[QuantileForecast]:
-        """Forecast up to ``cross_inference`` series of one window together."""
+        """Forecast up to ``cross_learning`` series of one window together.
+
+        Members of a group are right-aligned on their last value, so they are keyed on the
+        timestamp of that value as well as the window.
+        """
         contexts = self._contexts_from_entries(entries)
         # An entry's window is its occurrence count among the entries of the same item.
         seen: dict[str, int] = {}
-        by_window: dict[int, list[int]] = {}
+        by_window: dict[tuple[int, str], list[int]] = {}
         for i, entry in enumerate(entries):
             item = str(entry.get("item_id"))
-            by_window.setdefault(seen.get(item, 0), []).append(i)
+            by_window.setdefault((seen.get(item, 0), _last_timestamp(entry)), []).append(i)
             seen[item] = seen.get(item, 0) + 1
         groups = [
-            rows[start : start + self.cross_inference]
-            for _, rows in sorted(by_window.items())
-            for start in range(0, len(rows), self.cross_inference)
+            rows[start : start + self.cross_learning]
+            for _, rows in sorted(by_window.items(), key=lambda kv: kv[0][0])
+            for start in range(0, len(rows), self.cross_learning)
         ]
-        groups_per_call = max(1, self.batch_size // self.cross_inference)
+        groups_per_call = max(1, self.batch_size // self.cross_learning)
         device = next(self.model.parameters()).device
         quantiles = self._empty_quantiles(len(entries))
         with tqdm(

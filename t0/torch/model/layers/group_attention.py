@@ -63,7 +63,9 @@ class VariateSelfAttention(nn.Module):
     ) -> Float[Tensor, "variates patches embed"]:
         # Flip time and variate axes for attention along variate dimension.
         # Pattern from Chronos-2: "batch time d -> time batch d".
-        x_flipped = rearrange(x, "v s d -> s v d")
+        # Call contiguous to reduce variability in prediction
+        # Due to different kernel dispatch depending on the memory layout
+        x_flipped = rearrange(x, "v s d -> s v d").contiguous()
 
         qkv = self.wQKV(x_flipped)
         qkv = rearrange(qkv, "s v (three h d) -> three s h v d", three=3, h=self.num_heads, d=self.head_dim)

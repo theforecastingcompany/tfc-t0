@@ -11,7 +11,6 @@ with scaling, rollout and inference mode.
 """
 
 import contextlib
-import sys
 from collections.abc import Sequence
 from typing import Any, overload
 
@@ -27,11 +26,6 @@ from t0.data import TimeSeries
 from t0.forecast import Forecast
 from t0.forecaster import DEFAULT_MAX_HORIZON, ForecasterBase
 from t0.torch.model.layers import PatchEncoder, QuantileHead, ResidualBlock, Transformer
-
-if sys.version_info >= (3, 11):
-    pass
-else:
-    pass
 
 __all__ = ["DEFAULT_MAX_HORIZON", "T0Forecaster"]
 
@@ -134,6 +128,7 @@ class T0Forecaster(
         symmetric_averaging: bool = ...,
         clip_nonnegative: bool = ...,
         snap_integers: bool = ...,
+        drop_constant_covariates: bool = ...,
     ) -> Forecast[Tensor]: ...
 
     @overload
@@ -155,6 +150,7 @@ class T0Forecaster(
         symmetric_averaging: bool = ...,
         clip_nonnegative: bool = ...,
         snap_integers: bool = ...,
+        drop_constant_covariates: bool = ...,
     ) -> Forecast[Tensor]: ...
 
     @torch.inference_mode()
@@ -172,6 +168,7 @@ class T0Forecaster(
         symmetric_averaging: bool = False,
         clip_nonnegative: bool = False,
         snap_integers: bool = False,
+        drop_constant_covariates: bool = True,
     ) -> Forecast[Tensor]:
         return super().predict(
             model_input,
@@ -185,6 +182,7 @@ class T0Forecaster(
             symmetric_averaging=symmetric_averaging,
             clip_nonnegative=clip_nonnegative,
             snap_integers=snap_integers,
+            drop_constant_covariates=drop_constant_covariates,
         )
 
     predict.__doc__ = ForecasterBase.predict.__doc__

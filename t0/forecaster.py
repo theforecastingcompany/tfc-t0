@@ -9,10 +9,9 @@ the scope ``predict`` runs in, and materializing lazy results.
 import contextlib
 import dataclasses
 import math
-import sys
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 
@@ -26,11 +25,6 @@ from t0.quantile import extrapolate_quantiles, sanitize_predictions
 from t0.rollout import rollout
 from t0.scaler import CausalScaler
 from t0.types import MaskType, VariateType
-
-if sys.version_info >= (3, 11):
-    from typing import Self
-else:
-    from typing_extensions import Self
 
 __all__ = ["DEFAULT_MAX_HORIZON", "ForecasterBase"]
 
@@ -58,7 +52,7 @@ class ForecasterBase(ABC):
         return cls(**dataclasses.asdict(config))
 
     def _init_shared(self, config: T0Config) -> None:
-        """Set the config and the stateless components; call once the framework module is initialized."""
+        """Set the config and the stateless components, once the framework module is initialized."""
         # config.json is the single serialized source of truth.
         self.config = config
         self.patch_size = config.patch_size
@@ -74,11 +68,11 @@ class ForecasterBase(ABC):
 
     @abstractmethod
     def _as_array(self, value: Any, *, floating: bool) -> Any:
-        """``value`` as the runtime's array, on the model's device; float32 when ``floating``."""
+        """``value`` as the runtime's array on the model's device, in float32 when ``floating``."""
 
     @abstractmethod
     def _device(self) -> Any:
-        """Where the model's arrays live; ``None`` where arrays have no device."""
+        """Where the model's arrays live, or ``None`` when arrays have no device."""
 
     def _predict_scope(self) -> contextlib.AbstractContextManager:
         """The context the rollout's forward passes run in (e.g. mixed precision)."""
@@ -106,7 +100,7 @@ class ForecasterBase(ABC):
         return self.scaler.rescale_predictions(self(scaled), loc_scale, self.patch_size)  # ty: ignore[call-non-callable]
 
     def _predict_step(self, window: TimeSeries, horizon: int) -> Any:
-        """One pass over a window; the ``horizon`` steps after its context end, ``[rows, horizon, quantiles]``."""
+        """Forecast the ``horizon`` steps after a context window in one pass, as ``[rows, horizon, quantiles]``."""
         predictions = self._single_pass(window)
         context_patches = (window.seq_len - horizon) // self.patch_size
         predictions = predictions[:, context_patches - 1 : context_patches - 1 + horizon // self.patch_size]
@@ -126,6 +120,7 @@ class ForecasterBase(ABC):
         symmetric_averaging: bool = False,
         clip_nonnegative: bool = False,
         snap_integers: bool = False,
+        drop_constant_covariates: bool = True,
     ) -> Forecast:
         """Forecast ``horizon`` future timesteps, continuing auto-regressively past ``max_horizon``.
 
@@ -136,20 +131,20 @@ class ForecasterBase(ABC):
                 ``TimeSeries.from_array``. NaN marks a missing observation unless ``mask``
                 says otherwise.
             horizon: Number of future timesteps to forecast.
-            quantile_levels: Quantile levels to return, sorted ascending in ``(0, 1)``; levels
-                between trained ones are interpolated, levels beyond them extrapolated on
-                exponential tails.
+            quantile_levels: Quantile levels to return, sorted ascending in ``(0, 1)``. Levels
+                between the trained ones are interpolated. Levels beyond them are extrapolated
+                with exponential tails.
             context_length: Width of the right-aligned historical context. Defaults to the
                 start of the forecast region.
             future_covariates: Array inputs only. ``[B, F, T + horizon]`` covariates known over
-                the context and horizon (e.g. calendar features); conditioned on but not
-                forecast. NaN over the horizon is 0.
+                the context and horizon, such as calendar features. The model conditions on
+                them but does not forecast them. NaN over the horizon is read as 0.
             mask: Array inputs only. ``MaskType`` values shaped like the context: ``MISSING``
                 for an absent observation, ``PAD`` for a cell that only pads a shorter series
                 out to the batch's width. Defaults to reading every NaN as missing. Only
                 all-``PAD`` patches are left unattended.
             group_ids: Array inputs only. One id per context row, marking which rows are
-                variates of the same series; rows sharing an id are forecast jointly. Defaults
+                variates of the same series. Rows sharing an id are forecast jointly. Defaults
                 to one series per sample. Cannot be combined with ``future_covariates``.
             trim_leading_missing: Treat the missing stretch before a series' first
                 observation as padding, on its target and covariate rows alike.
@@ -162,8 +157,12 @@ class ForecasterBase(ABC):
             snap_integers: Round a target row's forecast to integers when its observed context
                 is integer-valued.
 
-            The four adjustments use only each series' own history and are off by default;
-            enabling all four is the recommended setting.
+            The four adjustments use only each series' own history. They are off by default.
+            Enabling all four is recommended.
+
+            drop_constant_covariates: Ignore a known-future covariate whose observed context
+                values are all equal. With no variation in the context the covariate carries
+                no evidence of its effect. Applied per series. Applied by default.
 
         Returns:
             Quantiles shaped ``[B, horizon, Q]`` or ``[B, V, horizon, Q]`` for array inputs,
@@ -226,8 +225,11 @@ class ForecasterBase(ABC):
                 f"for context_length={context_length} and horizon={horizon}, got {series.seq_len}"
             )
 
+        # Trim first: the constant check must see only the context the model will attend to.
         if trim_leading_missing:
             series = _trim_leading_missing(series, context_length)
+        if drop_constant_covariates and has_future:
+            series, target_rows = _drop_constant_covariates(series, context_length, target_rows)
         levels = _with_mirrors(quantile_levels) if symmetric_averaging else quantile_levels
         predictions = self._forecast(series, horizon, context_length, levels, target_rows)
         if symmetric_averaging or clip_nonnegative or snap_integers:
@@ -332,6 +334,32 @@ def _observed_history(series: TimeSeries, context_length: int, target_rows: list
     return [values[row][(mask[row] == MaskType.VALID) & np.isfinite(values[row])] for row in target_rows]
 
 
+def _drop_constant_covariates(
+    series: TimeSeries, context_length: int, target_rows: list[int]
+) -> tuple[TimeSeries, list[int]]:
+    """Remove future-covariate rows constant over the context, with the target rows' new indices."""
+    values = _to_host(series.variates)[:, :context_length]
+    mask = _to_host(series.mask)[:, :context_length]
+    kinds = _to_host(series.variate_type)[:, -1]
+    keep = []
+    for row, kind in enumerate(kinds):
+        if kind == VariateType.FUTURE:
+            seen = values[row][(mask[row] == MaskType.VALID) & np.isfinite(values[row])]
+            if seen.size == 0 or seen.min() == seen.max():
+                continue
+        keep.append(row)
+    if len(keep) == len(kinds):
+        return series, target_rows
+    ops = ops_for(series.variates)
+    index = ops.asarray(keep, dtype=ops.int64, device=series.device)
+    series = dataclasses.replace(
+        series,
+        **{field.name: ops.take(getattr(series, field.name), index, axis=0) for field in dataclasses.fields(series)},
+    )
+    position = {row: new for new, row in enumerate(keep)}
+    return series, [position[row] for row in target_rows]
+
+
 def _trim_leading_missing(series: TimeSeries, context_length: int) -> TimeSeries:
     """Mark every row of a series PAD before its targets' first observation."""
     values = _to_host(series.variates).astype(np.float64)
@@ -354,7 +382,7 @@ def _trim_leading_missing(series: TimeSeries, context_length: int) -> TimeSeries
 def _negated(series: TimeSeries) -> TimeSeries:
     """Every row negated, its gaps after the first observation linearly interpolated.
 
-    A gap past a row's last observation takes that last value; filled cells become
+    A gap past a row's last observation takes that last value. Filled cells become
     observations of the negated copy.
     """
     values = _to_host(series.variates).astype(np.float64)
@@ -397,7 +425,7 @@ def _symmetric_average(
     requested: tuple[float, ...],
     history: list[np.ndarray],
 ) -> np.ndarray:
-    """``(f(x)_q - f(-x)_{1-q}) / 2`` at the requested levels; rows floored at zero keep ``f(x)``."""
+    """``(f(x)_q - f(-x)_{1-q}) / 2`` at the requested levels. Rows floored at zero keep ``f(x)``."""
     mirror = [_level_index(levels, 1.0 - level) for level in levels]
     averaged = (positive - negated[..., mirror]) / 2
     combined = np.where(_averaged_rows(history)[:, None, None], averaged, positive)

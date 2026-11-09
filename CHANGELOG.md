@@ -4,6 +4,27 @@ All notable changes to `tfc-t0` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.6.1] - 2026-11-05
+
+### Changed
+
+- **Breaking:** Python 3.10 is no longer supported. Python 3.10 reached end of
+  life in October 2026. Security fixes from dependency packages are released
+  for Python 3.11+ only.
+- **Breaking:** rename `T0Predictor(cross_inference=N)` to
+  `T0Predictor(cross_learning=N)`. It forecasts together the series of one
+  window that end on the same date. The term is misleading, since forecasting
+  is zero-shot and nothing is learned, but it is the name the literature
+  commonly uses.
+- `predict` ignores a future covariate whose context values never change.
+  This is controlled by the `drop_constant_covariates` keyword.
+
+### Fixed
+
+- Forecasts in the PyTorch runtime no longer depend on how inputs are batched.
+
 ## [0.6.0] - 2026-10-13
 
 Adds support for `t0-gamma`.
@@ -45,10 +66,8 @@ Adds support for `t0-gamma`.
 
 ### Fixed
 
-- Historical covariates are now handled over the forecast horizon as in
-  training. Forecasts that use them over a horizon longer than 32 steps change.
-- Known-future covariates no longer attend to the target and historical rows,
-  as in training. Forecasts that use them change by a few percent.
+- Historical covariates are handled differently over the forecast horizon.
+- Known-future covariates no longer attend to the target and historical rows.
 - A covariate's first patch is no longer mistaken for a target when the
   context length is not a multiple of 32. Forecasts change slightly for those
   covariate rows only.
@@ -56,9 +75,8 @@ Adds support for `t0-gamma`.
 ## [0.5.0] - 2026-09-17
 
 Adds support for `t0-beta`, the 256M-parameter second public checkpoint.
-Earlier releases load its weights without error but run them under
-`t0-alpha`'s normalization, which silently degrades the forecast — this is the
-minimum version that serves it correctly.
+Earlier releases run its weights under `t0-alpha`'s normalization. This is
+the minimum version that serves it correctly.
 
 ### Added
 
@@ -110,8 +128,7 @@ Breaking. `T0Forecaster` now has two forecasting methods instead of four.
   context boundary. It now left-pads to the context boundary and right-pads the
   forecast region to whole patches. `predict` was never affected, because
   `RolloutManager` already aligned its buffer. Calling `forward` directly with
-  known-future covariates returned a wrong forecast that still looked valid. On
-  `t0-alpha` with a 24-step context and a 12-step horizon it moved MAE from 3.72 to 8.32.
+  known-future covariates now gives the same forecast as `predict`.
 
 ### Added
 - `horizon` on `TimeSeries.from_array`, extending the target rows with that many
@@ -162,8 +179,7 @@ Documentation-only release.
 ## [0.2.3] - 2026-07-30
 
 ### Fixed
-- First patches were not attended to when leading time steps were padding.
-It resulted in degraded performances of the model.
+- First patches are now attended to when leading time steps are padding.
 
 ### Changed
 - Internals of the model regarding mask computation and patched variables handling.

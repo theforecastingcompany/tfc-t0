@@ -6,15 +6,9 @@ t0-beta respectively.
 """
 
 import json
-import sys
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-from typing import Any, Literal
-
-if sys.version_info >= (3, 11):
-    from typing import Self
-else:
-    from typing_extensions import Self
+from typing import Any, Literal, Self
 
 # How the scaler keeps a standard deviation away from zero: "variance_offset"
 # adds eps to the variance before the square root, "std_clamp" lower-bounds the
@@ -67,8 +61,7 @@ class T0Config:
             coordinates (see ``XposScaleLayout``).
         scaler_zero_no_value: Whether cells without an observation (padding,
             missing or forecast) enter the model as zero after scaling. When
-            unset they enter as the scaled value of zero, the convention of
-            checkpoints trained before the two were told apart.
+            unset they enter as the scaled value of zero.
     """
 
     embed_dim: int
